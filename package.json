@@ -1,0 +1,18 @@
+{
+  "name": "whatsapp-sender",
+  "version": "1.0.0",
+  "description": "WhatsApp group message sender for ZeroClaw",
+  "main": "send.js",
+  "scripts": {
+    "list": "node send.js --list",
+    "send": "node send.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc.9",
+    "pino": "^10.3.1",
+    "puppeteer": "^24.40.0",
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "1.34.6"
+  }
+}
