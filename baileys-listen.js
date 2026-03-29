@@ -76,20 +76,19 @@ async function startBot() {
     if (qr) {
       currentQR = qr;
       console.log('\n===========================================');
-      console.log('    📱 SCAN THIS QR CODE WITH WHATSAPP! 📱');
+      console.log('    SCAN THIS QR CODE WITH WHATSAPP!');
       console.log('===========================================\n');
       try {
-        const qrAscii = await qrcode.toString(qr, { type: 'terminal', small: false });
+        const qrAscii = await qrcode.toString(qr, { errorCorrectionLevel: 'L' });
         console.log(qrAscii);
         await qrcode.toFile(QR_PATH, qr);
-        console.log('\nQR saved to: ' + QR_PATH);
+        console.log('QR saved to: ./' + QR_PATH);
       } catch (err) {
-        console.log('QR generation error:', err.message);
+        console.log('QR save error:', err.message);
       }
-      console.log('\nIf QR is not visible, options:');
+      console.log('\nOptions to scan:');
       console.log('1. Screenshot this terminal');
-      console.log('2. File: ./' + QR_PATH + ' (transfer to phone)');
-      console.log('3. Browser: http://localhost:' + PORT + '/qr');
+      console.log('2. Open browser: http://localhost:' + PORT + '/qr');
       console.log('===========================================\n');
     }
     
