@@ -70,7 +70,18 @@ async function startBot() {
   sock.ev.on('creds.update', saveCreds);
 
   sock.ev.on('connection.update', async (update) => {
-    const { connection, lastDisconnect } = update;
+    const { connection, lastDisconnect, qr } = update;
+    
+    if (qr) {
+      console.log(`[${new Date().toISOString()}] QR Code received! Saving...`);
+      try {
+        await qrcode.toFile(QR_PATH, qr);
+        console.log(`[${new Date().toISOString()}] QR saved to ${QR_PATH}`);
+        console.log(`[${new Date().toISOString()}] Scan QR at: http://localhost:${PORT}/qr`);
+      } catch (err) {
+        console.error(`[QR ERROR] ${err.message}`);
+      }
+    }
     
     if (connection === 'open') {
       myNumber = sock.user?.id?.split(':')[0];
