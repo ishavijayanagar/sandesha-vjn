@@ -28,7 +28,7 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.2",
+    "@whiskeysockets/baileys": "^7.0.0",
     "qrcode": "^1.5.4"
   }
 }
