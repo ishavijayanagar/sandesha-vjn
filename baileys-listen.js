@@ -69,31 +69,47 @@ async function startBot() {
 
   sock.ev.on('creds.update', saveCreds);
 
+  let currentQR = null;
+  
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
     
     if (qr) {
-      console.log(`[${new Date().toISOString()}] QR Code received! Saving...`);
+      currentQR = qr;
+      console.log('\n===========================================');
+      console.log('    📱 SCAN THIS QR CODE WITH WHATSAPP! 📱');
+      console.log('===========================================\n');
       try {
+        const qrAscii = await qrcode.toString(qr, { type: 'terminal', small: false });
+        console.log(qrAscii);
         await qrcode.toFile(QR_PATH, qr);
-        console.log(`[${new Date().toISOString()}] QR saved to ${QR_PATH}`);
-        console.log(`[${new Date().toISOString()}] Scan QR at: http://localhost:${PORT}/qr`);
+        console.log('\nQR saved to: ' + QR_PATH);
       } catch (err) {
-        console.error(`[QR ERROR] ${err.message}`);
+        console.log('QR generation error:', err.message);
       }
+      console.log('\nIf QR is not visible, options:');
+      console.log('1. Screenshot this terminal');
+      console.log('2. File: ./' + QR_PATH + ' (transfer to phone)');
+      console.log('3. Browser: http://localhost:' + PORT + '/qr');
+      console.log('===========================================\n');
     }
     
     if (connection === 'open') {
       myNumber = sock.user?.id?.split(':')[0];
-      console.log(`[${new Date().toISOString()}] WhatsApp connected`);
-      console.log(`[${new Date().toISOString()}] My number: ${myNumber}`);
+      console.log(`\n✅ WhatsApp connected! Number: ${myNumber}\n`);
+      if (currentQR) {
+        console.log('QR has been cleared after successful login.');
+        currentQR = null;
+      }
       startServer();
     }
     
     if (connection === 'close') {
       const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-      console.log(`[${new Date().toISOString()}] Connection closed. Reconnecting: ${shouldReconnect}`);
-      if (shouldReconnect) startBot();
+      if (shouldReconnect) {
+        console.log('Connection closed. Reconnecting...');
+        startBot();
+      }
     }
   });
 
@@ -145,6 +161,8 @@ Just type naturally:
 ➕ !addcontact <n> <num> - Add contact
 🔎 !track <msg>   - Track replies
 📋 !replies       - Show tracked replies
+📱 !qr            - Get QR code (if auth needed)
+📊 !status        - Bot status
 🆘 !help           - Show this help`;
     
     await sock.sendMessage(jid, { text: help });
@@ -305,7 +323,46 @@ Just type naturally:
     return;
   }
   
+  if (raw === 'qr') {
+    await handleQRCommand(jid);
+    return;
+  }
+  
+  if (raw === 'status') {
+    const groups = loadGroups();
+    const contacts = loadContacts();
+    const schedules = loadSchedules();
+    const uptime = process.uptime();
+    const days = Math.floor(uptime / 86400);
+    const hours = Math.floor((uptime % 86400) / 3600);
+    const mins = Math.floor((uptime % 3600) / 60);
+    
+    await sock.sendMessage(jid, { text: `🤖 *Bot Status*
+
+📱 WhatsApp: ${myNumber || 'Connecting...'}
+⏱️ Uptime: ${days}d ${hours}h ${mins}m
+👥 Contacts: ${Object.keys(contacts.contacts).length}
+📋 Sets: ${Object.keys(groups).length}
+📅 Schedules: ${schedules.length}
+🆙 Server: Port ${PORT}` });
+    return;
+  }
+  
   await sock.sendMessage(jid, { text: `Unknown command: !${raw.split(' ')[0]}\nType !help` });
+}
+
+async function handleQRCommand(jid) {
+  if (currentQR) {
+    try {
+      const qrBuffer = await qrcode.toBuffer(currentQR);
+      await sock.sendMessage(jid, { image: qrBuffer, caption: '📱 Scan this QR code with WhatsApp!' });
+      return;
+    } catch (err) {
+      await sock.sendMessage(jid, { text: 'Could not generate QR: ' + err.message });
+      return;
+    }
+  }
+  await sock.sendMessage(jid, { text: 'No QR code available.\nQR is only shown during initial login.\nIf disconnected, restart the bot.' });
 }
 
 function startServer() {
@@ -320,11 +377,30 @@ function startServer() {
     
     if (req.method === 'GET' && parsed.pathname === '/qr') {
       if (fs.existsSync(QR_PATH)) {
-        res.writeHead(200, { 'Content-Type': 'image/png' });
-        res.end(fs.readFileSync(QR_PATH));
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        const imgBase64 = fs.readFileSync(QR_PATH).toString('base64');
+        res.end(`<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WhatsApp QR Code</title>
+  <style>
+    body { font-family: Arial; text-align: center; padding: 20px; background: #111; color: #fff; }
+    h1 { color: #25D366; }
+    img { max-width: 100%; border: 4px solid #25D366; border-radius: 8px; }
+    p { color: #888; }
+  </style>
+</head>
+<body>
+  <h1>📱 WhatsApp QR Code</h1>
+  <img src="data:image/png;base64,${imgBase64}" alt="QR Code">
+  <p>Scan with WhatsApp on your phone</p>
+  <p><a href="/qr" style="color:#25D366;">Refresh</a></p>
+</body>
+</html>`);
       } else {
         res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end('<html><body><h1>QR not available</h1></body></html>');
+        res.end('<html><body style="font-family:Arial;text-align:center;padding:50px;background:#111;color:#fff"><h1 style="color:#25D366">QR Not Available</h1><p>Start the bot to get QR code</p></body></html>');
       }
       return;
     }
@@ -339,5 +415,14 @@ function startServer() {
   });
 }
 
+process.on('uncaughtException', (err) => {
+  console.log('[ERROR] Uncaught:', err.message);
+});
+
+process.on('unhandledRejection', (err) => {
+  console.log('[ERROR] Unhandled:', err);
+});
+
 console.log('Starting WhatsApp Bot...');
+console.log('Press Ctrl+C to stop (or close terminal)\n');
 startBot();
