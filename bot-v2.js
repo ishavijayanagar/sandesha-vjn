@@ -22,7 +22,6 @@ async function startBot() {
   
   sock = makeWASocket({
     auth: state,
-    logger: undefined,
     printQRInTerminal: false,
   });
 

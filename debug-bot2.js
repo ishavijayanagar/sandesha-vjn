@@ -19,7 +19,6 @@ async function startBot() {
   
   sock = makeWASocket({
     auth: state,
-    logger: undefined,
   });
 
   sock.ev.on('creds.update', saveCreds);
