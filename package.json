@@ -1,11 +1,29 @@
 {
-  "name": "whatsapp-sender",
+  "name": "wa-group-bot",
   "version": "1.0.0",
-  "description": "WhatsApp group message sender for ZeroClaw",
-  "main": "send.js",
+  "description": "WhatsApp Group Bot - Manage groups, schedule messages, track replies",
+  "main": "listen.js",
   "scripts": {
+    "start": "node listen.js",
+    "dev": "node listen.js",
     "list": "node send.js --list",
     "send": "node send.js"
+  },
+  "keywords": [
+    "whatsapp",
+    "bot",
+    "whatsapp-web",
+    "automation",
+    "groups"
+  ],
+  "author": "debug1ife",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/debug1ife/wa-bot.git"
+  },
+  "engines": {
+    "node": ">=16.0.0"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
