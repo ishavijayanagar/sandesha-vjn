@@ -1283,6 +1283,22 @@ function startSendServer() {
       return;
     }
 
+    if (req.method === 'GET' && parsed.pathname === '/qr') {
+      try {
+        if (fs.existsSync(QR_PATH)) {
+          const qrImage = fs.readFileSync(QR_PATH);
+          res.writeHead(200, { 'Content-Type': 'image/png' });
+          res.end(qrImage);
+        } else {
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          res.end('<html><body><h1>No QR code needed</h1><p>WhatsApp is already authenticated.</p></body></html>');
+        }
+      } catch (err) {
+        res.writeHead(500); res.end(err.message);
+      }
+      return;
+    }
+
     if (req.method === 'GET' && parsed.pathname === '/test-members') {
       try {
         const groupName = parsed.query.name || 'My Group';
@@ -1341,8 +1357,9 @@ function startSendServer() {
     res.writeHead(404); res.end('Not found');
   });
 
-  server.listen(LISTEN_PORT, '127.0.0.1', () => {
-    console.error(`[${new Date().toISOString()}] Send server on http://127.0.0.1:${LISTEN_PORT}`);
+  server.listen(LISTEN_PORT, '0.0.0.0', () => {
+    console.error(`[${new Date().toISOString()}] Send server on http://0.0.0.0:${LISTEN_PORT}`);
+    console.error(`[${new Date().toISOString()}] Access QR code at http://localhost:${LISTEN_PORT}/qr`);
     console.error(`[${new Date().toISOString()}] =========================================`);
     console.error(`[${new Date().toISOString()}] IMPORTANT: Join the "Me Commands" group on WhatsApp to send bot commands!`);
     console.error(`[${new Date().toISOString()}] =========================================`);
