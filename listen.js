@@ -111,7 +111,7 @@ client.on('ready', async () => {
   log('Setup complete!');
 });
 
-let lastProcessedTimestamp = 0;
+let lastProcessedTimestamp = Math.floor(Date.now() / 1000);
 let pollInterval = null;
 let isInitializing = false;
 
@@ -1234,61 +1234,72 @@ function writeNotification(text) {
 
 function startScheduler() {
   if (schedulerInterval) return;
-  console.error('[SCHEDULER] Starting scheduler...');
+  log('[SCHEDULER] Starting scheduler...');
+  
+  // Run once immediately
+  runSchedulerCheck();
+  
   schedulerInterval = setInterval(async () => {
-    // Clean up old schedule IDs (older than 24 hours) to prevent memory leak
-    const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
-    for (const id of sentScheduleIds) {
-      if (id < oneDayAgo) sentScheduleIds.delete(id);
-    }
-    
-    const schedules = loadSchedules();
-    const now = new Date();
-    console.error(`[SCHEDULER] Checking ${schedules.length} schedules at ${now.toISOString()}`);
-    const pending = [];
-    
-    for (const schedule of schedules) {
-      // Skip already sent schedules
-      if (sentScheduleIds.has(schedule.id)) continue;
+    runSchedulerCheck();
+  }, 30000);
+}
+
+async function runSchedulerCheck() {
+  try {
+      // Clean up old schedule IDs (older than 24 hours) to prevent memory leak
+      const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+      for (const id of sentScheduleIds) {
+        if (id < oneDayAgo) sentScheduleIds.delete(id);
+      }
       
-      const runAt = new Date(schedule.runAt);
-      if (runAt <= now) {
-        console.log(`[SCHEDULE] Sending: "${schedule.message}" to ${schedule.target}`);
-        sentScheduleIds.add(schedule.id); // Mark as sent
-        try {
-          const sets = loadSets();
-          
-          // Try to resolve target
-          const setGroups = sets[schedule.target.toLowerCase()];
-          if (setGroups) {
-            console.log(`[SCHEDULE] Sending to ${setGroups.length} groups with 2s delay...`);
-            for (let i = 0; i < setGroups.length; i++) {
-              await resolveAndSend(setGroups[i], schedule.message);
-              if (i < setGroups.length - 1) {
-                await delay(2000); // 2 second delay
+      const schedules = loadSchedules();
+      const now = new Date();
+      console.error(`[SCHEDULER] Checking ${schedules.length} schedules at ${now.toISOString()}`);
+      const pending = [];
+      
+      for (const schedule of schedules) {
+        // Skip already sent schedules
+        if (sentScheduleIds.has(schedule.id)) continue;
+        
+        const runAt = new Date(schedule.runAt);
+        if (runAt <= now) {
+          console.log(`[SCHEDULE] Sending: "${schedule.message}" to ${schedule.target}`);
+          sentScheduleIds.add(schedule.id); // Mark as sent
+          try {
+            const sets = loadSets();
+            
+            // Try to resolve target
+            const setGroups = sets[schedule.target.toLowerCase()];
+            if (setGroups) {
+              console.log(`[SCHEDULE] Sending to ${setGroups.length} groups with 2s delay...`);
+              for (let i = 0; i < setGroups.length; i++) {
+                await resolveAndSend(setGroups[i], schedule.message);
+                if (i < setGroups.length - 1) {
+                  await delay(2000); // 2 second delay
+                }
               }
+            } else {
+              // Check if it's a contact
+              const contact = resolveContact(schedule.target);
+              const target = contact || schedule.target;
+              await resolveAndSend(target, schedule.message);
             }
-          } else {
-            // Check if it's a contact
-            const contact = resolveContact(schedule.target);
-            const target = contact || schedule.target;
-            await resolveAndSend(target, schedule.message);
+            
+            // Write notification to log file instead of sending via WhatsApp
+            writeNotification(`✅ Sent: "${schedule.message}" → ${schedule.target}`);
+          } catch (err) {
+            console.error(`[SCHEDULE ERROR] ${err.message}`);
+            pending.push(schedule);
           }
-          
-          // Write notification to log file instead of sending via WhatsApp
-          // (sending via WhatsApp causes loops because the notification text gets parsed as a command)
-          writeNotification(`✅ Sent: "${schedule.message}" → ${schedule.target}`);
-        } catch (err) {
-          console.error(`[SCHEDULE ERROR] ${err.message}`);
+        } else {
           pending.push(schedule);
         }
-      } else {
-        pending.push(schedule);
       }
+      
+      saveSchedules(pending);
+    } catch (err) {
+      console.error('[SCHEDULER ERROR]', err.message);
     }
-    
-    saveSchedules(pending);
-  }, 30000); // Check every 30 seconds
 }
 
 client.initialize();

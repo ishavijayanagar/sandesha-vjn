@@ -6,9 +6,10 @@
   "scripts": {
     "list": "node send.js --list",
     "send": "node send.js",
-    "test": "node tests/run-tests.js",
-    "test:http": "node tests/test-http.js",
-    "test:all": "node tests/run-all-tests.js"
+    "test": "node tests/comprehensive.test.js && node tests/mock-integration.test.js",
+    "test:unit": "node tests/comprehensive.test.js",
+    "test:mock": "node tests/mock-integration.test.js",
+    "test:http": "node tests/test-http.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
