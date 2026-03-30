@@ -1,11 +1,14 @@
 {
   "name": "sandesha",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Sandesha - WhatsApp Group Messaging Bot",
   "main": "send.js",
   "scripts": {
     "list": "node send.js --list",
-    "send": "node send.js"
+    "send": "node send.js",
+    "test": "node tests/run-tests.js",
+    "test:http": "node tests/test-http.js",
+    "test:all": "node tests/run-all-tests.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc.9",

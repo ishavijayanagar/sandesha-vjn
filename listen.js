@@ -111,8 +111,9 @@ client.on('ready', async () => {
   log('Setup complete!');
 });
 
-let lastProcessedTimestamp = Math.floor(Date.now() / 1000);
+let lastProcessedTimestamp = 0;
 let pollInterval = null;
+let isInitializing = false;
 
 function startMessagePoller() {
   if (pollInterval) return;
@@ -136,15 +137,25 @@ function startMessagePoller() {
       ]);
       
       console.log(`[POLL] Got ${messages.length} messages`);
-      
+       
       for (const msg of messages) {
+        // Only process messages from the bot itself (fromMe=true)
+        if (!msg.fromMe) {
+          // Track timestamp but don't process
+          if (msg.timestamp > lastProcessedTimestamp) {
+            lastProcessedTimestamp = msg.timestamp;
+          }
+          continue;
+        }
+        
         if (msg.timestamp <= lastProcessedTimestamp) continue;
-        // Don't filter by fromMe for testing
-        lastProcessedTimestamp = msg.timestamp;
         
         const hasMedia = msg.hasMedia;
         const isFromMe = msg.fromMe;
         console.log(`[POLL] msg: fromMe=${isFromMe}, hasMedia=${hasMedia}, body="${msg.body.substring(0, 80)}"`);
+        
+        // Track bot's own messages
+        lastProcessedTimestamp = msg.timestamp;
         
         if (recentReplies.has(msg.body.trim())) continue;
         if (lastReplyText && msg.body.trim() === lastReplyText.trim()) continue;
@@ -286,7 +297,12 @@ async function resolveAndSendMedia(target, media, caption) {
 
 client.on('disconnected', (reason) => {
   console.error(`[${new Date().toISOString()}] Disconnected: ${reason}`);
-  setTimeout(() => client.initialize(), 5000);
+  if (isInitializing) return;
+  isInitializing = true;
+  setTimeout(() => {
+    client.initialize();
+    isInitializing = false;
+  }, 5000);
 });
 
 async function setupCommandsGroup() {
@@ -319,23 +335,24 @@ function handleIncomingMessage(msg) {
 
       log(`MSG fromMe=${isFromMe} from=${msg.from} chat=${chat.name} body="${msg.body?.substring(0, 80)}" hasMedia=${msg.hasMedia}`);
 
+      // Skip messages from others (we only process commands sent through this WhatsApp Web session)
       if (!isFromMe) { resolve(); return; }
-
-      // Skip bot's own replies (prevent infinite loops)
-      if (recentReplies.has(msg.body.trim())) {
-        log('SKIP: Bot reply message');
-        resolve(); return;
-      }
 
       if (!commandsGroupJid) { resolve(); return; }
       
-      // Check if from Me Commands group (compare both JID formats and chat name)
+      // Check if from Me Commands group
       const isFromCommandsGroup = 
         msg.from === commandsGroupJid ||
         chat.name === COMMANDS_GROUP_NAME ||
         (chat.isGroup && chat.name.toLowerCase() === COMMANDS_GROUP_NAME.toLowerCase());
       
       if (!isFromCommandsGroup) { resolve(); return; }
+
+      // Skip bot's own replies (prevent infinite loops)
+      if (recentReplies.has(msg.body.trim())) {
+        log('SKIP: Bot reply message');
+        resolve(); return;
+      }
       
       // Skip if this is the bot's own message (prevent infinite loops)
       const now = Math.floor(Date.now() / 1000);
@@ -400,8 +417,8 @@ function handleIncomingMessage(msg) {
   });
 }
 
-client.on('message', (msg) => { handleIncomingMessage(msg); });
-client.on('message_create', (msg) => { handleIncomingMessage(msg); });
+// Message events handled by poller only (to prevent duplicates)
+// client.on('message', (msg) => { handleIncomingMessage(msg); });
 
 async function handleCommand(text, msg) {
   const raw = text.trim().slice(1).trim();
@@ -1219,6 +1236,12 @@ function startScheduler() {
   if (schedulerInterval) return;
   console.error('[SCHEDULER] Starting scheduler...');
   schedulerInterval = setInterval(async () => {
+    // Clean up old schedule IDs (older than 24 hours) to prevent memory leak
+    const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+    for (const id of sentScheduleIds) {
+      if (id < oneDayAgo) sentScheduleIds.delete(id);
+    }
+    
     const schedules = loadSchedules();
     const now = new Date();
     console.error(`[SCHEDULER] Checking ${schedules.length} schedules at ${now.toISOString()}`);
