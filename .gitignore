@@ -1,0 +1,60 @@
+# Byte-compiled / optimized / DLL files
+node_modules/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+dist/
+build/
+
+# WhatsApp session data (IMPORTANT - DO NOT COMMIT)
+.wwebjs_auth/
+.baileys_auth/
+.wwebjs_cache/
+
+# Media files
+media/
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.mp4
+*.pdf
+
+# Logs
+*.log
+logs/
+notifications.log
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# JSON data files (personal config)
+schedules.json
+contacts.json
+groups.json
+qr-code.png
+
+# Test files
+test_*.js
+getgroups.js
+debug.js
+
+# Windows
+nul
+
+# Subfolders
+whatsapp-sender/
