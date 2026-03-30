@@ -328,8 +328,14 @@ function handleIncomingMessage(msg) {
 
       console.log(`[MSG] fromMe=${isFromMe}, from=${msg.from}, chat=${chat.name || chat.id._serialized}, body="${msg.body.substring(0, 80)}"`);
 
-      if (commandsGroupJid && msg.from !== commandsGroupJid) { 
-        console.log(`[MSG] Ignoring: wrong group. msg.from=${msg.from}, commandsGroupJid=${commandsGroupJid}`); 
+      // Accept commands from: 1) Me Commands group OR 2) Personal chat (user's own number)
+      const isFromCommandsGroup = msg.from === commandsGroupJid;
+      const isPersonalChat = msg.from === myNumber || msg.from === myNumber?.replace('@c.us', '@s.whatsapp.net');
+      
+      console.log(`[CHECK] myNumber=${myNumber}, msg.from=${msg.from}, isFromCommandsGroup=${isFromCommandsGroup}, isPersonalChat=${isPersonalChat}`);
+      
+      if (!isFromCommandsGroup && !isPersonalChat) {
+        console.log(`[MSG] Ignoring: not from commands group or personal chat`);
         resolve(); return; 
       }
       if (msg.timestamp && msg.timestamp <= lastProcessedTimestamp) { resolve(); return; }
