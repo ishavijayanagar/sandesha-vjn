@@ -2,11 +2,10 @@
   "name": "wa-group-bot",
   "version": "1.1.0",
   "description": "WhatsApp Group Bot - Manage groups, schedule messages, track replies",
-  "main": "baileys-listen.js",
+  "main": "listen.js",
   "scripts": {
-    "start": "node baileys-listen.js",
-    "dev": "node baileys-listen.js",
-    "start:web": "node listen.js",
+    "start": "node listen.js",
+    "start:phone": "node baileys-listen.js",
     "list": "node send.js --list",
     "send": "node send.js"
   },
@@ -28,7 +27,8 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^7.0.0-rc.9",
-    "qrcode": "^1.5.4"
+    "@whiskeysockets/baileys": "^6.7.6",
+    "qrcode": "^1.5.4",
+    "whatsapp-web.js": "^1.23.0"
   }
 }
