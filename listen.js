@@ -737,6 +737,7 @@ Just type naturally:
 📢 !all <msg>      - Broadcast to all
 📋 !sets           - List group sets
 📱 !groups         - List all groups
+🔀 !forward <msg> to <group> - Forward to another group
 👥 !members <name> - List group members
 🔍 !find <name>   - Find member in groups
 📊 !inactive [d]  - Show inactive groups
@@ -755,6 +756,51 @@ Just type naturally:
 Format: <msg> !schedule to <target> at <time>
 Example: Hello !schedule to family at 9am`;
     await botReply(msg, help);
+    return;
+  }
+
+  // Forward message to another group
+  if (raw.startsWith('forward ') || raw.startsWith('fwd ')) {
+    const parts = raw.replace(/^(forward|fwd)\s+/i, '').split(/\s+to\s+/i);
+    if (parts.length !== 2) {
+      await botReply(msg, 'Usage: !forward <message> to <group>\nExample: !forward Hello everyone to family');
+      return;
+    }
+    
+    const message = parts[0].trim();
+    const targetGroup = parts[1].trim().toLowerCase();
+    
+    await botReply(msg, `Forwarding to ${targetGroup}...`);
+    
+    try {
+      const sets = loadSets();
+      let targetJid = null;
+      
+      // Check if target is a set
+      const setGroups = sets[targetGroup];
+      if (setGroups && Array.isArray(setGroups)) {
+        for (const groupName of setGroups) {
+          const chat = await resolveAndSend(groupName, message);
+        }
+        await botReply(msg, `✅ Forwarded "${message}" to ${setGroups.length} groups in ${targetGroup}`);
+        return;
+      }
+      
+      // Find direct group
+      const chats = await client.getChats();
+      const group = chats.find(c => 
+        c.isGroup && c.name.toLowerCase().includes(targetGroup)
+      );
+      
+      if (group) {
+        await group.sendMessage(message);
+        await botReply(msg, `✅ Forwarded to ${group.name}`);
+      } else {
+        await botReply(msg, `Group "${targetGroup}" not found`);
+      }
+    } catch (err) {
+      await botReply(msg, `Error: ${err.message}`);
+    }
     return;
   }
 
