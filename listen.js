@@ -5,6 +5,22 @@ const fs = require('fs');
 const http = require('http');
 const url = require('url');
 
+// Single instance lock - prevent running bot twice
+const LOCK_FILE = path.join(__dirname, '.lock');
+
+if (fs.existsSync(LOCK_FILE)) {
+  console.error('❌ Bot is already running! Delete .lock file if not.');
+  process.exit(1);
+}
+fs.writeFileSync(LOCK_FILE, process.pid.toString());
+
+process.on('exit', () => {
+  try { fs.unlinkSync(LOCK_FILE); } catch {}
+});
+process.on('SIGINT', () => {
+  try { fs.unlinkSync(LOCK_FILE); } catch {}
+});
+
 // Graceful shutdown
 process.on('SIGINT', () => {
   console.log('\n[SHUTDOWN] Shutting down gracefully...');
@@ -242,6 +258,13 @@ async function handleMediaMessage(msg) {
     const media = await msg.downloadMedia();
     log('Media downloaded:', media ? 'success' : 'failed');
     if (!media) { await botReply(msg, 'Failed to download media'); return; }
+    
+    // Check file size (max 16MB)
+    const MAX_FILE_SIZE = 16 * 1024 * 1024;
+    if (media.data && Buffer.from(media.data, 'base64').length > MAX_FILE_SIZE) {
+      await botReply(msg, 'File too large (max 16MB)'); 
+      return;
+    }
     
     const ext = media.mimetype.split('/')[1]?.split(';')[0] || 'bin';
     const filename = `media_${Date.now()}.${ext}`;
