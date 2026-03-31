@@ -5,6 +5,15 @@ const fs = require('fs');
 const http = require('http');
 const url = require('url');
 
+// Graceful shutdown
+process.on('SIGINT', () => {
+  console.log('\n[SHUTDOWN] Shutting down gracefully...');
+  if (pollInterval) clearInterval(pollInterval);
+  if (schedulerInterval) clearInterval(schedulerInterval);
+  console.log('[SHUTDOWN] Cleanup complete. Goodbye!');
+  process.exit(0);
+});
+
 const SESSION_PATH = path.join(__dirname, '.wwebjs_auth');
 const QR_PATH = path.join(__dirname, 'qr-code.png');
 const GROUPS_FILE = path.join(__dirname, 'groups.json');
@@ -111,15 +120,54 @@ client.on('ready', async () => {
   log('Setup complete!');
 });
 
-let lastProcessedTimestamp = Math.floor(Date.now() / 1000);
+const STATE_FILE = path.join(__dirname, 'state.json');
+
+function loadState() {
+  try {
+    if (fs.existsSync(STATE_FILE)) {
+      const data = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+      console.log(`[STATE] Loaded lastProcessedTimestamp: ${data.lastProcessedTimestamp}`);
+      return data;
+    }
+  } catch (e) {
+    console.log(`[STATE] Error loading: ${e.message}`);
+  }
+  const ts = Math.floor(Date.now() / 1000);
+  console.log(`[STATE] Using current timestamp: ${ts}`);
+  return { lastProcessedTimestamp: ts };
+}
+
+function saveState(state) {
+  fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+}
+
+const initialState = loadState();
+let lastProcessedTimestamp = initialState.lastProcessedTimestamp;
 let pollInterval = null;
 let isInitializing = false;
+let reconnectAttempts = 0;
+const MAX_RECONNECT = 10;
+
+// Clear recentReplies periodically to prevent memory leak
+setInterval(() => {
+  if (recentReplies.size > 100) {
+    recentReplies.clear();
+  }
+}, 60000);
+
+function saveTimestamp() {
+  saveState({ lastProcessedTimestamp });
+  console.log(`[STATE] Saved lastProcessedTimestamp: ${lastProcessedTimestamp}`);
+}
 
 function startMessagePoller() {
   if (pollInterval) return;
   console.error('[POLL] Starting message poller');
   pollInterval = setInterval(async () => {
-    if (!commandsGroupJid) return;
+    if (!commandsGroupJid) {
+      console.log('[POLL] No commandsGroupJid, skipping');
+      return;
+    }
     console.log('[POLL] Checking for messages...');
     try {
       const chat = await Promise.race([
@@ -139,46 +187,47 @@ function startMessagePoller() {
       console.log(`[POLL] Got ${messages.length} messages`);
        
       for (const msg of messages) {
-        // Only process messages from the bot itself (fromMe=true)
-        if (!msg.fromMe) {
-          // Track timestamp but don't process
-          if (msg.timestamp > lastProcessedTimestamp) {
+        // Track ALL messages (both phone and web) to avoid reprocessing
+        if (msg.timestamp > lastProcessedTimestamp) {
+          // NEW message - process it
+          console.log(`[POLL] NEW msg: fromMe=${msg.fromMe}, timestamp=${msg.timestamp}, body="${msg.body?.substring(0, 30)}"`);
+          
+          // Skip if already replied recently (prevent infinite loop)
+          if (recentReplies.has(msg.body?.trim())) {
+            console.log(`[POLL] SKIP: in recentReplies`);
             lastProcessedTimestamp = msg.timestamp;
+            saveTimestamp();
+            continue;
           }
-          continue;
-        }
-        
-        if (msg.timestamp <= lastProcessedTimestamp) continue;
-        
-        const hasMedia = msg.hasMedia;
-        const isFromMe = msg.fromMe;
-        console.log(`[POLL] msg: fromMe=${isFromMe}, hasMedia=${hasMedia}, body="${msg.body.substring(0, 80)}"`);
-        
-        // Track bot's own messages
-        lastProcessedTimestamp = msg.timestamp;
-        
-        if (recentReplies.has(msg.body.trim())) continue;
-        if (lastReplyText && msg.body.trim() === lastReplyText.trim()) continue;
-        
-        if (hasMedia) {
-          await handleMediaMessage(msg);
-        } else if (msg.body.startsWith('!')) {
-          await handleCommand(msg.body, msg);
-        } else {
-          // Check for natural scheduling first
-          const scheduleIdx = msg.body.indexOf(' !schedule');
-          if (scheduleIdx > 0) {
-            const messagePart = msg.body.substring(0, scheduleIdx).trim();
-            const schedulePart = msg.body.substring(scheduleIdx + 2).trim();
-            await handleNaturalSchedule(messagePart, schedulePart, msg);
+          
+          // Process the message
+          lastProcessedTimestamp = msg.timestamp;
+          saveTimestamp();
+          
+          const hasMedia = msg.hasMedia;
+          
+          if (hasMedia) {
+            await handleMediaMessage(msg);
+          } else if (msg.body?.startsWith('!')) {
+            await handleCommand(msg.body, msg);
           } else {
-            const parsed = await parseNaturalCommand(msg.body);
-            if (parsed) {
-              await executeSend(parsed, msg);
+            // Check for natural scheduling first
+            const scheduleIdx = msg.body.indexOf(' !schedule');
+            if (scheduleIdx > 0) {
+              const messagePart = msg.body.substring(0, scheduleIdx).trim();
+              const schedulePart = msg.body.substring(scheduleIdx + 2).trim();
+              await handleNaturalSchedule(messagePart, schedulePart, msg);
             } else {
-              await handleAIChat(msg.body, msg);
+              const parsed = await parseNaturalCommand(msg.body);
+              if (parsed) {
+                await executeSend(parsed, msg);
+              } else {
+                await handleAIChat(msg.body, msg);
+              }
             }
           }
+        } else {
+          console.log(`[POLL] OLD msg: timestamp=${msg.timestamp} <= lastProcessedTimestamp=${lastProcessedTimestamp}, skipping`);
         }
       }
     } catch (err) {
@@ -297,7 +346,17 @@ async function resolveAndSendMedia(target, media, caption) {
 
 client.on('disconnected', (reason) => {
   console.error(`[${new Date().toISOString()}] Disconnected: ${reason}`);
+  
   if (isInitializing) return;
+  
+  if (reconnectAttempts >= MAX_RECONNECT) {
+    console.error(`[${new Date().toISOString()}] Max reconnect attempts (${MAX_RECONNECT}) reached, exiting...`);
+    process.exit(1);
+  }
+  
+  reconnectAttempts++;
+  console.error(`[${new Date().toISOString()}] Reconnecting... (attempt ${reconnectAttempts}/${MAX_RECONNECT})`);
+  
   isInitializing = true;
   setTimeout(() => {
     client.initialize();
