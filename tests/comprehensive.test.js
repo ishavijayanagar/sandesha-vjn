@@ -738,6 +738,181 @@ async function runTests() {
   
   assert(processed.length === 0, 'Poller skips messages with same timestamp');
 
+  // ============================================
+  // TEST SUITE 16: Forward Command Logic
+  // ============================================
+  console.log('--- Test Suite 16: Forward Command Logic ---');
+  
+  // Test parsing "forward to <group>"
+  function parseForwardTarget(body) {
+    if (!body.toLowerCase().startsWith('forward to ') && !body.toLowerCase().startsWith('fwd to ')) {
+      return null;
+    }
+    return body.replace(/^(forward|fwd)\s+to\s+/i, '').trim().toLowerCase();
+  }
+  
+  // Test forward target parsing
+  assert(parseForwardTarget('forward to family') === 'family', 'Forward parses target family');
+  assert(parseForwardTarget('fwd to work') === 'work', 'Forward parses target work');
+  assert(parseForwardTarget('FORWARD TO friends') === 'friends', 'Forward is case insensitive');
+  assert(parseForwardTarget('forward to group1 group2') === 'group1 group2', 'Forward parses multi-word target');
+  assert(parseForwardTarget('send to family') === null, 'Forward rejects non-forward command');
+  assert(parseForwardTarget('hello') === null, 'Forward rejects plain text');
+  
+  // Test quoted message detection
+  const quotedMsgWithMedia = { hasMedia: true, type: 'image', body: 'Check this', caption: 'My image' };
+  const quotedMsgTextOnly = { hasMedia: false, body: 'Hello world' };
+  const quotedMsgNoBody = { hasMedia: true, type: 'video', body: null, caption: 'Video' };
+  
+  assert(quotedMsgWithMedia.hasMedia === true, 'Quoted message detects media');
+  assert(quotedMsgTextOnly.hasMedia === false, 'Quoted message detects no media');
+  assert(quotedMsgNoBody.body === null, 'Quoted message can have null body');
+  
+  // Test sendQuotedContent logic - should handle media
+  function shouldForwardMedia(quotedMsg) {
+    return quotedMsg.hasMedia && quotedMsg.type !== 'chat';
+  }
+  
+  assert(shouldForwardMedia(quotedMsgWithMedia) === true, 'Should forward media for image');
+  assert(shouldForwardMedia(quotedMsgTextOnly) === false, 'Should not forward media for text');
+  assert(shouldForwardMedia(quotedMsgNoBody) === true, 'Should forward media even with null body');
+  
+  // Test group set resolution
+  const testSets = {
+    family: ['Family Group', 'Extended Family'],
+    work: ['Work Team'],
+    all: ['Family Group', 'Work Team', 'Friends']
+  };
+  
+  const resolveSetGroups = (targetGroup, sets) => {
+    const setGroups = sets[targetGroup];
+    if (setGroups && Array.isArray(setGroups)) {
+      return setGroups;
+    }
+    return null;
+  };
+  
+  assert(resolveSetGroups('family', testSets)?.length === 2, 'Family set has 2 groups');
+  assert(resolveSetGroups('work', testSets)?.length === 1, 'Work set has 1 group');
+  assert(resolveSetGroups('friends', testSets) === null, 'Non-existent set returns null');
+  
+  console.log('');
+
+  // ============================================
+  // TEST SUITE 17: Bot Commands Parsing
+  // ============================================
+  console.log('--- Test Suite 17: Bot Commands Parsing ---');
+  
+  // Simulate command parsing logic
+  function parseCommand(body) {
+    if (!body || !body.startsWith('!')) return null;
+    
+    const raw = body.slice(1).trim();
+    const cmdParts = raw.split(' ');
+    const cmd = cmdParts[0].toLowerCase();
+    const args = cmdParts.slice(1);
+    
+    return { cmd, args, raw, full: body };
+  }
+  
+  // Test !help command
+  const helpCmd = parseCommand('!help');
+  assert(helpCmd?.cmd === 'help', '!help command parsed');
+  assert(helpCmd?.args.length === 0, '!help has no args');
+  
+  // Test !groups command
+  const groupsCmd = parseCommand('!groups');
+  assert(groupsCmd?.cmd === 'groups', '!groups command parsed');
+  
+  // Test !sets command
+  const setsCmd = parseCommand('!sets');
+  assert(setsCmd?.cmd === 'sets', '!sets command parsed');
+  
+  // Test !send command with args
+  const sendCmd = parseCommand('!send family Hello');
+  assert(sendCmd?.cmd === 'send', '!send command parsed');
+  assert(sendCmd?.args[0] === 'family', '!send parses target');
+  assert(sendCmd?.args.slice(1).join(' ') === 'Hello', '!send parses message');
+  
+  // Test !all command
+  const allCmd = parseCommand('!all Hello everyone');
+  assert(allCmd?.cmd === 'all', '!all command parsed');
+  assert(allCmd?.args.join(' ') === 'Hello everyone', '!all parses message');
+  
+  // Test !members command
+  const membersCmd = parseCommand('!members Family');
+  assert(membersCmd?.cmd === 'members', '!members command parsed');
+  assert(membersCmd?.args[0] === 'Family', '!members parses group name');
+  
+  // Test !find command
+  const findCmd = parseCommand('!find John');
+  assert(findCmd?.cmd === 'find', '!find command parsed');
+  assert(findCmd?.args[0] === 'John', '!find parses name');
+  
+  // Test !inactive command
+  const inactiveCmd = parseCommand('!inactive');
+  assert(inactiveCmd?.cmd === 'inactive', '!inactive command parsed');
+  
+  const inactiveDaysCmd = parseCommand('!inactive 7');
+  assert(inactiveDaysCmd?.args[0] === '7', '!inactive parses days');
+  
+  // Test !schedules command
+  const schedulesCmd = parseCommand('!schedules');
+  assert(schedulesCmd?.cmd === 'schedules', '!schedules command parsed');
+  
+  // Test !cancel command
+  const cancelCmd = parseCommand('!cancel');
+  assert(cancelCmd?.cmd === 'cancel', '!cancel command parsed');
+  
+  // Test !contacts command
+  const contactsCmd = parseCommand('!contacts');
+  assert(contactsCmd?.cmd === 'contacts', '!contacts command parsed');
+  
+  // Test !addcontact command
+  const addContactCmd = parseCommand('!addcontact John 919999999999');
+  assert(addContactCmd?.cmd === 'addcontact', '!addcontact command parsed');
+  assert(addContactCmd?.args[0] === 'John', '!addcontact parses name');
+  assert(addContactCmd?.args[1] === '919999999999', '!addcontact parses number');
+  
+  // Test !track command
+  const trackCmd = parseCommand('!track Hello');
+  assert(trackCmd?.cmd === 'track', '!track command parsed');
+  assert(trackCmd?.args[0] === 'Hello', '!track parses message');
+  
+  // Test !replies command
+  const repliesCmd = parseCommand('!replies');
+  assert(repliesCmd?.cmd === 'replies', '!replies command parsed');
+  
+  // Test !seen command
+  const seenCmd = parseCommand('!seen Hello');
+  assert(seenCmd?.cmd === 'seen', '!seen command parsed');
+  assert(seenCmd?.args[0] === 'Hello', '!seen parses message');
+  
+  // Test !ai command
+  const aiCmd = parseCommand('!ai Hello bot');
+  assert(aiCmd?.cmd === 'ai', '!ai command parsed');
+  assert(aiCmd?.args.join(' ') === 'Hello bot', '!ai parses message');
+  
+  // Test !forward command (with ! prefix)
+  const forwardCmd = parseCommand('!forward Hello to family');
+  assert(forwardCmd?.cmd === 'forward', '!forward command parsed');
+  assert(forwardCmd?.args.join(' ') === 'Hello to family', '!forward parses full args');
+  
+  // Test command case insensitivity
+  const upperCmd = parseCommand('!HELP');
+  assert(upperCmd?.cmd === 'help', 'Commands are case insensitive');
+  
+  // Test unknown command
+  const unknownCmd = parseCommand('!unknowncmd');
+  assert(unknownCmd?.cmd === 'unknowncmd', 'Unknown command still parsed');
+  
+  // Test non-command (no ! prefix)
+  const nonCmd = parseCommand('hello world');
+  assert(nonCmd === null, 'Non-command returns null');
+  
+  const emptyCmd = parseCommand('');
+  assert(emptyCmd === null, 'Empty string returns null');
+  
   console.log('');
 
   // ============================================

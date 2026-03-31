@@ -178,20 +178,20 @@ function saveTimestamp() {
 
 function startMessagePoller() {
   if (pollInterval) return;
-  console.error('[POLL] Starting message poller');
+  log('[POLL] Starting message poller, commandsGroupJid=' + commandsGroupJid);
   pollInterval = setInterval(async () => {
     if (!commandsGroupJid) {
-      console.log('[POLL] No commandsGroupJid, skipping');
+      log('[POLL] No commandsGroupJid, skipping');
       return;
     }
-    console.log('[POLL] Checking for messages...');
+    log('[POLL] Checking for messages...');
     try {
       const chat = await Promise.race([
         client.getChatById(commandsGroupJid),
         new Promise((_, reject) => setTimeout(() => reject(new Error('getChat timeout')), 5000))
       ]);
       if (!chat) {
-        console.log('[POLL] Chat not found');
+        log('[POLL] Chat not found');
         return;
       }
       
@@ -200,17 +200,17 @@ function startMessagePoller() {
         new Promise((_, reject) => setTimeout(() => reject(new Error('fetchMessages timeout')), 5000))
       ]);
       
-      console.log(`[POLL] Got ${messages.length} messages`);
+      log(`[POLL] Got ${messages.length} messages`);
        
       for (const msg of messages) {
         // Track ALL messages (both phone and web) to avoid reprocessing
         if (msg.timestamp > lastProcessedTimestamp) {
           // NEW message - process it
-          console.log(`[POLL] NEW msg: fromMe=${msg.fromMe}, timestamp=${msg.timestamp}, body="${msg.body?.substring(0, 30)}"`);
+          log(`[POLL] NEW msg: fromMe=${msg.fromMe}, timestamp=${msg.timestamp}, body="${msg.body?.substring(0, 30)}"`);
           
           // Skip if already replied recently (prevent infinite loop)
           if (recentReplies.has(msg.body?.trim())) {
-            console.log(`[POLL] SKIP: in recentReplies`);
+            log(`[POLL] SKIP: in recentReplies`);
             lastProcessedTimestamp = msg.timestamp;
             saveTimestamp();
             continue;
@@ -233,6 +233,9 @@ function startMessagePoller() {
               const messagePart = msg.body.substring(0, scheduleIdx).trim();
               const schedulePart = msg.body.substring(scheduleIdx + 2).trim();
               await handleNaturalSchedule(messagePart, schedulePart, msg);
+            } else if (msg.body.toLowerCase().startsWith('forward to ') || msg.body.toLowerCase().startsWith('fwd to ')) {
+              // Handle forward without ! prefix
+              await handleForward(msg);
             } else {
               const parsed = await parseNaturalCommand(msg.body);
               if (parsed) {
@@ -243,11 +246,11 @@ function startMessagePoller() {
             }
           }
         } else {
-          console.log(`[POLL] OLD msg: timestamp=${msg.timestamp} <= lastProcessedTimestamp=${lastProcessedTimestamp}, skipping`);
+          log(`[POLL] OLD msg: timestamp=${msg.timestamp} <= lastProcessedTimestamp=${lastProcessedTimestamp}, skipping`);
         }
       }
     } catch (err) {
-      console.error(`[POLL ERROR] ${err.message}`);
+      log(`[POLL ERROR] ${err.message}`);
     }
   }, 5000);
 }
@@ -759,6 +762,61 @@ Example: Hello !schedule to family at 9am`;
     return;
   }
 
+  // Forward quoted/replied message to another group
+  if (raw.startsWith('forward to ') || raw.startsWith('fwd to ')) {
+    const targetGroup = raw.replace(/^(forward|fwd)\s+to\s+/i, '').trim().toLowerCase();
+    
+    if (!targetGroup) {
+      await botReply(msg, 'Usage: Reply to a message with "forward to <group>"');
+      return;
+    }
+    
+    try {
+      // Get quoted message
+      const quotedMsg = await msg.getQuotedMessage();
+      
+      if (!quotedMsg) {
+        await botReply(msg, '❌ No message quoted/replied to. Reply to a message and type "forward to <group>"');
+        return;
+      }
+      
+      await botReply(msg, `Forwarding quoted message to ${targetGroup}...`);
+      
+      const sets = loadSets();
+      
+      // Check if target is a set
+      const setGroups = sets[targetGroup];
+      if (setGroups && Array.isArray(setGroups)) {
+        for (const groupName of setGroups) {
+          const chat = await client.getChatById(groupName);
+          if (chat && quotedMsg.body) {
+            await chat.sendMessage(quotedMsg.body);
+          }
+        }
+        await botReply(msg, `✅ Forwarded message to ${setGroups.length} groups in ${targetGroup}`);
+        return;
+      }
+      
+      // Find direct group
+      const chats = await client.getChats();
+      const group = chats.find(c => 
+        c.isGroup && c.name.toLowerCase().includes(targetGroup)
+      );
+      
+      if (group && quotedMsg.body) {
+        await group.sendMessage(quotedMsg.body);
+        await botReply(msg, `✅ Forwarded message to ${group.name}`);
+      } else if (!quotedMsg.body) {
+        await botReply(msg, '❌ Can only forward text messages currently');
+      } else {
+        await botReply(msg, `Group "${targetGroup}" not found`);
+      }
+    } catch (err) {
+      await botReply(msg, `Error: ${err.message}`);
+    }
+    return;
+  }
+
   // Forward message to another group
   if (raw.startsWith('forward ') || raw.startsWith('fwd ')) {
     const parts = raw.replace(/^(forward|fwd)\s+/i, '').split(/\s+to\s+/i);
@@ -811,6 +869,76 @@ Example: Hello !schedule to family at 9am`;
   }
 
   await botReply(msg, `Unknown command: !${raw.split(' ')[0]}\nType !help`);
+}
+
+async function handleForward(msg) {
+  const body = msg.body.trim();
+  
+  if (!body.toLowerCase().startsWith('forward to ') && !body.toLowerCase().startsWith('fwd to ')) {
+    return;
+  }
+  
+  const targetGroup = body.replace(/^(forward|fwd)\s+to\s+/i, '').trim().toLowerCase();
+  
+  if (!targetGroup) {
+    await botReply(msg, 'Usage: Reply to a message with "forward to <group>"');
+    return;
+  }
+  
+  try {
+    const quotedMsg = await msg.getQuotedMessage();
+    
+    if (!quotedMsg) {
+      await botReply(msg, '❌ No message quoted/replied to. Reply to a message and type "forward to <group>"');
+      return;
+    }
+    
+    await botReply(msg, `Forwarding quoted message to ${targetGroup}...`);
+    
+    const sets = loadSets();
+    
+    // Check if target is a set (like "family")
+    const setGroups = sets[targetGroup];
+    if (setGroups && Array.isArray(setGroups)) {
+      for (const groupName of setGroups) {
+        try {
+          await sendQuotedContent(groupName, quotedMsg);
+        } catch (e) { /* skip failed group */ }
+      }
+      await botReply(msg, `✅ Forwarded message to ${setGroups.length} groups in ${targetGroup}`);
+      return;
+    }
+    
+    // Try direct group name
+    try {
+      await sendQuotedContent(targetGroup, quotedMsg);
+      await botReply(msg, `✅ Forwarded message to ${targetGroup}`);
+      return;
+    } catch (e) {
+      // Continue to error
+    }
+    
+    await botReply(msg, `Group "${targetGroup}" not found`);
+  } catch (err) {
+    await botReply(msg, `Error: ${err.message}`);
+  }
+}
+
+async function sendQuotedContent(target, quotedMsg) {
+  // Check if quoted message has media
+  if (quotedMsg.hasMedia && quotedMsg.type !== 'chat') {
+    const media = await quotedMsg.downloadMedia();
+    if (media) {
+      const caption = quotedMsg.caption || quotedMsg.body || '';
+      await resolveAndSendMedia(target, media, caption);
+      return;
+    }
+  }
+  
+  // No media, just send text
+  if (quotedMsg.body) {
+    await resolveAndSend(target, quotedMsg.body);
+  }
 }
 
 async function parseNaturalCommand(input) {
