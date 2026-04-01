@@ -560,9 +560,116 @@ async function handleCommand(text, msg) {
     return;
   }
 
-  // Find member in groups
-  if (raw.startsWith('find ') || raw.startsWith('member ') || raw.startsWith('search ')) {
-    const searchName = raw.replace(/^(find|member|search)\s+/i, '').trim();
+  // List all group names only
+  if (raw === 'grouplist' || raw === 'allgroups') {
+    const chats = await client.getChats();
+    const groups = chats.filter(c => c.isGroup);
+    if (groups.length === 0) { await botReply(msg, 'No groups found'); return; }
+    
+    let reply = `📋 *All Groups (${groups.length})*\n━━━━━━━━━━━━━━━━━━━━\n`;
+    for (const g of groups) {
+      reply += `• ${g.name}\n`;
+    }
+    await botReply(msg, reply);
+    return;
+  }
+
+  // Show active/inactive status of all groups
+  if (raw === 'groupstatus' || raw === 'groupactive') {
+    const chats = await client.getChats();
+    const groups = chats.filter(c => c.isGroup);
+    if (groups.length === 0) { await botReply(msg, 'No groups found'); return; }
+    
+    await botReply(msg, `Checking ${groups.length} groups...`);
+    
+    const active = [];
+    const week = [];
+    const inactive = [];
+    
+    for (const g of groups) {
+      try {
+        const messages = await Promise.race([
+          g.fetchMessages({ limit: 1 }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
+        ]);
+        if (messages.length === 0) {
+          inactive.push(g.name);
+          continue;
+        }
+        const daysInactive = Math.floor((Math.floor(Date.now() / 1000) - messages[0].timestamp) / 86400);
+        if (daysInactive > 30) inactive.push(g.name);
+        else if (daysInactive > 7) week.push(g.name);
+        else active.push(g.name);
+      } catch (e) {
+        inactive.push(g.name);
+      }
+    }
+    
+    let reply = `📊 *Group Status*\n━━━━━━━━━━━━━━━━━━━━\n`;
+    reply += `🟢 Active (< 7 days): ${active.length}\n`;
+    reply += `🟡 Week inactive (7-30 days): ${week.length}\n`;
+    reply += `🔴 Inactive (> 30 days): ${inactive.length}\n`;
+    reply += `━━━━━━━━━━━━━━━━━━━━\n`;
+    reply += `Total: ${groups.length} groups`;
+    
+    await botReply(msg, reply);
+    return;
+  }
+
+  // List members of a specific group
+  if (raw.startsWith('members ') || raw.startsWith('members ')) {
+    const groupName = raw.replace(/^members\s+/i, '').trim();
+    if (!groupName) {
+      await botReply(msg, 'Usage: !members <group_name>\nExample: !members Family');
+      return;
+    }
+    
+    const chats = await client.getChats();
+    const groups = chats.filter(c => c.isGroup);
+    const group = groups.find(g => g.name.toLowerCase().includes(groupName.toLowerCase()));
+    
+    if (!group) {
+      await botReply(msg, `Group "${groupName}" not found`);
+      return;
+    }
+    
+    try {
+      const participants = group.participants || [];
+      
+      if (participants.length === 0) {
+        // Try to fetch participants if not available
+        try {
+          await group.fetchParticipants();
+        } catch (e) { /* ignore */ }
+      }
+      
+      const memberList = group.participants || [];
+      
+      if (memberList.length === 0) {
+        await botReply(msg, `No members found in "${group.name}"`);
+        return;
+      }
+      
+      let reply = `Members in "${group.name}" (${memberList.length}):\n`;
+      for (const p of memberList.slice(0, 50)) {
+        const contact = p.id ? await client.getContactById(p.id._serialized).catch(() => null) : null;
+        const name = contact?.pushname || contact?.name || contact?.shortName || p.name || p.shortName || 'Unknown';
+        const phone = p.id?.user || 'Unknown';
+        reply += `• ${name} (${phone})\n`;
+      }
+      if (memberList.length > 50) {
+        reply += `\n...and ${memberList.length - 50} more.`;
+      }
+      await botReply(msg, reply);
+    } catch (e) {
+      await botReply(msg, `Error fetching members: ${e.message}`);
+    }
+    return;
+  }
+
+  // Find member across all groups
+  if (raw.startsWith('find ') || raw.startsWith('search ')) {
+    const searchName = raw.replace(/^(find|search)\s+/i, '').trim();
     if (!searchName) {
       await botReply(msg, 'Usage: !find <name>\nExample: !find Veena amma');
       return;
@@ -576,9 +683,12 @@ async function handleCommand(text, msg) {
     
     for (const g of groups) {
       try {
-        await g.fetchParticipants();
         const participants = g.participants || [];
-        for (const p of participants) {
+        if (participants.length === 0) {
+          try { await g.fetchParticipants(); } catch (e) { /* ignore */ }
+        }
+        const memberList = g.participants || [];
+        for (const p of memberList) {
           const name = p.name || p.shortName || '';
           if (name.toLowerCase().includes(searchName.toLowerCase())) {
             found.push({ group: g.name, name });
@@ -740,8 +850,10 @@ Just type naturally:
 📢 !all <msg>      - Broadcast to all
 📋 !sets           - List group sets
 📱 !groups         - List all groups
+📋 !grouplist      - List all group names
+📊 !groupstatus    - Show active/inactive status
 🔀 !forward <msg> to <group> - Forward to another group
-👥 !members <name> - List group members
+👥 !members <group> - List group members
 🔍 !find <name>   - Find member in groups
 📊 !inactive [d]  - Show inactive groups
 📅 !schedules      - List scheduled msgs
