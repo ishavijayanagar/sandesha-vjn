@@ -1,0 +1,1311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sandesha — Command Center</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --surface2: #21253a; --border: #2a2f45;
+      --accent: #25d366; --accent2: #128c7e; --blue: #4f8ef7; --purple: #9b6dff;
+      --orange: #ff9f43; --red: #ff6b6b; --text: #e8eaf6; --muted: #7b82a0; --sidebar-w: 220px;
+    }
+    body { background: var(--bg); color: var(--text); font-family: 'Inter','Segoe UI',sans-serif; display: flex; height: 100vh; overflow: hidden; }
+
+    /* SIDEBAR */
+    .sidebar { width: var(--sidebar-w); background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
+    .sidebar-logo { padding: 20px 18px 16px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); }
+    .logo-icon { width: 34px; height: 34px; background: linear-gradient(135deg,var(--accent),var(--accent2)); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 17px; }
+    .logo-text { font-size: 16px; font-weight: 700; }
+    .logo-ver { font-size: 10px; color: var(--muted); margin-top: 1px; }
+    .nav { padding: 12px 10px; flex: 1; overflow-y: auto; }
+    .nav-label { font-size: 10px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; padding: 8px 8px 4px; }
+    .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; cursor: pointer; font-size: 13.5px; color: var(--muted); transition: all .15s; margin-bottom: 2px; }
+    .nav-item:hover { background: var(--surface2); color: var(--text); }
+    .nav-item.active { background: rgba(37,211,102,.12); color: var(--accent); font-weight: 600; }
+    .nav-item .icon { font-size: 15px; width: 18px; text-align: center; }
+    .nav-badge { margin-left: auto; background: var(--accent); color: #000; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 10px; }
+    .nav-badge.red { background: var(--red); color: #fff; }
+    .nav-badge.orange { background: var(--orange); color: #000; }
+    .sidebar-footer { padding: 12px 10px; border-top: 1px solid var(--border); }
+    .bot-status { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--surface2); border-radius: 8px; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent); flex-shrink: 0; }
+    .status-text { font-size: 12px; color: var(--muted); }
+    .status-text strong { color: var(--text); display: block; font-size: 12.5px; }
+
+    /* MAIN */
+    .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .topbar { padding: 14px 24px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; background: var(--surface); flex-shrink: 0; }
+    .topbar-title { font-size: 17px; font-weight: 700; }
+    .topbar-sub { font-size: 12px; color: var(--muted); margin-top: 1px; }
+    .topbar-actions { display: flex; gap: 8px; align-items: center; }
+    .btn { padding: 7px 14px; border-radius: 7px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: all .15s; }
+    .btn-primary { background: var(--accent); color: #000; }
+    .btn-primary:hover { background: #2ee872; }
+    .btn-ghost { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+    .btn-ghost:hover { background: var(--border); }
+    .btn-warn { background: rgba(255,159,67,.15); color: var(--orange); border: 1px solid rgba(255,159,67,.3); }
+    .btn-warn:hover { background: rgba(255,159,67,.25); }
+    .btn-danger { background: rgba(255,107,107,.1); color: var(--red); border: 1px solid rgba(255,107,107,.2); }
+    .btn-schedule { background: rgba(79,142,247,.15); color: var(--blue); border: 1px solid rgba(79,142,247,.3); }
+
+    .content { flex: 1; overflow-y: auto; padding: 22px 24px; }
+    .content::-webkit-scrollbar { width: 5px; }
+    .content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* PAGES */
+    .page { display: none; }
+    .page.active { display: block; }
+
+    /* GRIDS */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 16px; }
+
+    /* CARD */
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; }
+    .card-title { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; margin-bottom: 10px; }
+
+    /* STAT */
+    .stat-card { display: flex; flex-direction: column; gap: 6px; }
+    .stat-num { font-size: 28px; font-weight: 700; }
+    .delta-up { font-size: 11.5px; color: var(--accent); }
+    .delta-warn { font-size: 11.5px; color: var(--orange); }
+
+    /* ACCOUNT CARDS */
+    .account-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; display: flex; align-items: center; gap: 14px; cursor: pointer; transition: border-color .15s; }
+    .account-card:hover { border-color: var(--accent); }
+    .account-card.warn { border-color: rgba(255,159,67,.4); }
+    .account-avatar { width: 42px; height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+    .account-info { flex: 1; min-width: 0; }
+    .account-name { font-size: 14px; font-weight: 600; }
+    .account-num { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .account-stats { display: flex; gap: 12px; margin-top: 6px; flex-wrap: wrap; }
+    .account-stat { font-size: 11px; color: var(--muted); }
+    .account-stat span { color: var(--text); font-weight: 600; }
+    .account-stat span.warn { color: var(--orange); }
+    .account-badge { padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; flex-shrink: 0; }
+    .badge-online { background: rgba(37,211,102,.15); color: var(--accent); }
+    .badge-warn { background: rgba(255,159,67,.15); color: var(--orange); }
+
+    /* BANNER */
+    .banner { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 10px; margin-bottom: 16px; font-size: 13px; }
+    .banner-warn { background: rgba(255,159,67,.1); border: 1px solid rgba(255,159,67,.3); color: var(--orange); }
+    .banner-info { background: rgba(79,142,247,.1); border: 1px solid rgba(79,142,247,.3); color: var(--blue); }
+    .banner-icon { font-size: 16px; flex-shrink: 0; }
+    .banner-text { flex: 1; }
+    .banner-action { font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap; text-decoration: underline; }
+
+    /* FORMS */
+    .form-group { flex: 1; display: flex; flex-direction: column; gap: 5px; }
+    .form-label { font-size: 11.5px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
+    .form-select, .form-input { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); padding: 9px 12px; font-size: 13.5px; outline: none; transition: border-color .15s; width: 100%; }
+    .form-select:focus, .form-input:focus { border-color: var(--accent); }
+    .form-textarea { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); padding: 10px 12px; font-size: 13.5px; outline: none; transition: border-color .15s; width: 100%; resize: vertical; min-height: 90px; font-family: inherit; line-height: 1.5; }
+    .form-textarea:focus { border-color: var(--accent); }
+    .compose-row { display: flex; gap: 10px; margin-bottom: 12px; }
+
+    /* SCHEDULE */
+    .schedule-item { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+    .schedule-item:last-child { border-bottom: none; }
+    .sched-time { font-size: 12px; color: var(--muted); width: 80px; flex-shrink: 0; text-align: right; }
+    .sched-time strong { color: var(--text); display: block; font-size: 13px; }
+    .sched-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .sched-info { flex: 1; min-width: 0; }
+    .sched-msg { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sched-target { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+
+    /* ACTIVITY */
+    .activity-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+    .activity-item:last-child { border-bottom: none; }
+    .activity-icon { width: 30px; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 13px; flex-shrink: 0; margin-top: 1px; }
+    .act-send { background: rgba(37,211,102,.12); } .act-fail { background: rgba(255,107,107,.12); }
+    .act-sched { background: rgba(79,142,247,.12); } .act-reply { background: rgba(155,109,255,.12); }
+    .act-warn { background: rgba(255,159,67,.12); }
+    .activity-body { flex: 1; }
+    .activity-text { font-size: 13px; line-height: 1.4; }
+    .activity-text strong { color: var(--accent); }
+    .activity-meta { font-size: 11px; color: var(--muted); margin-top: 3px; }
+
+    /* TABLES */
+    .group-table { width: 100%; border-collapse: collapse; }
+    .group-table th { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); background: var(--surface2); }
+    .group-table td { padding: 11px 12px; font-size: 13px; border-bottom: 1px solid rgba(42,47,69,.6); vertical-align: middle; }
+    .group-table tr:hover td { background: rgba(255,255,255,.02); }
+    .checkbox { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+
+    /* PILLS */
+    .pill { padding: 3px 9px; border-radius: 10px; font-size: 11px; font-weight: 600; display: inline-block; }
+    .pill-green { background: rgba(37,211,102,.12); color: var(--accent); }
+    .pill-yellow { background: rgba(255,159,67,.12); color: var(--orange); }
+    .pill-red { background: rgba(255,107,107,.12); color: var(--red); }
+    .pill-blue { background: rgba(79,142,247,.12); color: var(--blue); }
+    .pill-muted { background: rgba(123,130,160,.12); color: var(--muted); }
+    .set-tag { display: inline-block; padding: 2px 8px; background: rgba(79,142,247,.12); color: var(--blue); border-radius: 6px; font-size: 11px; margin-right: 4px; }
+
+    /* MEMBERSHIP STATUS */
+    .mem-confirmed { color: var(--accent); font-size: 13px; }
+    .mem-removed   { color: var(--red); font-size: 13px; }
+    .mem-inactive  { color: var(--orange); font-size: 13px; }
+    .mem-unknown   { color: var(--muted); font-size: 13px; }
+
+    /* SETS */
+    .sets-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; }
+    .set-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; cursor: pointer; transition: border-color .15s; }
+    .set-card:hover { border-color: var(--accent); }
+    .set-card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+    .set-name { font-size: 14px; font-weight: 600; }
+    .set-groups { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+    .set-group-chip { font-size: 11px; padding: 2px 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; color: var(--muted); }
+    .set-group-chip.warn { border-color: rgba(255,159,67,.4); color: var(--orange); }
+
+    /* ANALYTICS */
+    .bar-chart { display: flex; align-items: flex-end; gap: 6px; height: 130px; padding-top: 10px; }
+    .bar-col { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1; }
+    .bar { width: 100%; border-radius: 4px 4px 0 0; transition: opacity .2s; cursor: pointer; }
+    .bar:hover { opacity: .8; }
+    .bar-label { font-size: 10px; color: var(--muted); }
+    .bar-val { font-size: 10px; color: var(--muted); }
+    .donut-row { display: flex; align-items: center; gap: 20px; }
+    .donut-wrap { position: relative; width: 100px; height: 100px; flex-shrink: 0; }
+    .donut-wrap svg { transform: rotate(-90deg); }
+    .donut-center { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); text-align: center; }
+    .donut-pct { font-size: 20px; font-weight: 700; }
+    .donut-sub { font-size: 10px; color: var(--muted); }
+    .legend { display: flex; flex-direction: column; gap: 8px; }
+    .legend-item { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+    .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+    /* ACCOUNTS PAGE */
+    .account-detail-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; display: flex; gap: 20px; align-items: flex-start; }
+    .account-detail-name { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+    .account-detail-num { font-size: 13px; color: var(--muted); margin-bottom: 14px; }
+    .detail-stats { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; }
+    .detail-stat { background: var(--surface2); border-radius: 8px; padding: 10px 14px; }
+    .detail-stat-num { font-size: 20px; font-weight: 700; }
+    .detail-stat-label { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+    /* TABS */
+    .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 18px; }
+    .tab { padding: 9px 16px; font-size: 13.5px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; transition: all .15s; }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+
+    /* SECTION HEADER */
+    .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+    .section-title { font-size: 14px; font-weight: 700; }
+    .section-link { font-size: 12px; color: var(--accent); cursor: pointer; }
+
+    /* PROGRESS */
+    .progress-bar-wrap { background: var(--surface2); border-radius: 4px; height: 6px; overflow: hidden; margin-top: 6px; }
+    .progress-bar { height: 100%; border-radius: 4px; background: var(--accent); transition: width .4s; }
+
+    /* COMPOSE */
+    .compose-box { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+    .compose-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
+    .char-count { font-size: 12px; color: var(--muted); }
+    .compose-actions { display: flex; gap: 8px; }
+
+    /* CHIP */
+    .chip { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: 20px; font-size: 12px; cursor: pointer; transition: all .15s; }
+    .chip:hover { border-color: var(--accent); }
+    .chip.active { background: rgba(37,211,102,.12); border-color: var(--accent); color: var(--accent); }
+
+    /* MODALS */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.65); backdrop-filter: blur(4px); z-index: 100; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity .2s; }
+    .modal-overlay.open { opacity: 1; pointer-events: all; }
+    .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 24px; width: 520px; transform: translateY(10px); transition: transform .2s; max-height: 85vh; overflow-y: auto; }
+    .modal.wide { width: 680px; }
+    .modal-overlay.open .modal { transform: translateY(0); }
+    .modal-title { font-size: 16px; font-weight: 700; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center; }
+    .modal-sub { font-size: 12.5px; color: var(--muted); margin-bottom: 18px; }
+    .modal-close { cursor: pointer; color: var(--muted); font-size: 20px; }
+    .modal-close:hover { color: var(--text); }
+    .modal-footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
+
+    /* PRE-SEND CHECK LIST */
+    .check-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px; margin-bottom: 6px; }
+    .check-row.ok   { background: rgba(37,211,102,.07); border: 1px solid rgba(37,211,102,.2); }
+    .check-row.bad  { background: rgba(255,107,107,.07); border: 1px solid rgba(255,107,107,.2); }
+    .check-row.warn { background: rgba(255,159,67,.07);  border: 1px solid rgba(255,159,67,.2); }
+    .check-icon { font-size: 16px; flex-shrink: 0; }
+    .check-info { flex: 1; }
+    .check-name { font-size: 13px; font-weight: 600; }
+    .check-reason { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+    .check-skip { font-size: 11px; color: var(--muted); cursor: pointer; }
+    .check-skip:hover { color: var(--red); }
+
+    /* DISCOVER MODAL GROUP LIST */
+    .discover-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 6px; background: var(--surface2); cursor: pointer; transition: border-color .15s; }
+    .discover-row:hover { border-color: var(--accent); }
+    .discover-row.selected { border-color: var(--accent); background: rgba(37,211,102,.07); }
+    .discover-row .dr-name { flex: 1; font-size: 13px; font-weight: 600; }
+    .discover-row .dr-meta { font-size: 11.5px; color: var(--muted); }
+    .discover-row .dr-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; flex-shrink: 0; }
+    .dr-check { width: 18px; height: 18px; border: 2px solid var(--border); border-radius: 5px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; transition: all .15s; }
+    .discover-row.selected .dr-check { background: var(--accent); border-color: var(--accent); color: #000; }
+
+    /* TOAST */
+    .toast { position: fixed; bottom: 24px; right: 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; display: flex; align-items: center; gap: 10px; font-size: 13.5px; z-index: 200; transform: translateX(120%); transition: transform .3s ease; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+    .toast.show { transform: translateX(0); }
+
+    /* MISC */
+    .divider { height: 1px; background: var(--border); margin: 16px 0; }
+    select option { background: var(--surface2); }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinning { animation: spin 1s linear infinite; display: inline-block; }
+  </style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-icon">💬</div>
+    <div><div class="logo-text">Sandesha</div><div class="logo-ver">Command Center v1.0</div></div>
+  </div>
+  <nav class="nav">
+    <div class="nav-label">Main</div>
+    <div class="nav-item active" onclick="navigate('dashboard',this)"><span class="icon">🏠</span> Dashboard</div>
+    <div class="nav-item" onclick="navigate('send',this)"><span class="icon">📤</span> Send Message</div>
+    <div class="nav-item" onclick="navigate('scheduler',this)"><span class="icon">🗓</span> Scheduler <span class="nav-badge">3</span></div>
+    <div class="nav-label" style="margin-top:10px">Manage</div>
+    <div class="nav-item" onclick="navigate('accounts',this)"><span class="icon">📱</span> Accounts</div>
+    <div class="nav-item" onclick="navigate('groups',this)"><span class="icon">👥</span> Groups & Sets <span class="nav-badge orange">1</span></div>
+    <div class="nav-item" onclick="navigate('contacts',this)"><span class="icon">📋</span> Contacts</div>
+    <div class="nav-label" style="margin-top:10px">Insights</div>
+    <div class="nav-item" onclick="navigate('history',this)"><span class="icon">📜</span> Send History <span class="nav-badge red">2</span></div>
+    <div class="nav-item" onclick="navigate('analytics',this)"><span class="icon">📊</span> Analytics</div>
+    <div class="nav-item" onclick="navigate('logs',this)"><span class="icon">🔍</span> Logs</div>
+  </nav>
+  <div class="sidebar-footer">
+    <div class="bot-status">
+      <div class="status-dot"></div>
+      <div class="status-text"><strong>Bot Online</strong>2 accounts active</div>
+    </div>
+  </div>
+</aside>
+
+<!-- MAIN -->
+<main class="main">
+  <div class="topbar" id="topbar">
+    <div>
+      <div class="topbar-title" id="topbar-title">Dashboard</div>
+      <div class="topbar-sub" id="topbar-sub">Monday, 14 Apr 2026 · 10:32 AM</div>
+    </div>
+    <div class="topbar-actions">
+      <button class="btn btn-ghost" onclick="showToast('🔄 Refreshing...','#4f8ef7')">Refresh</button>
+      <button class="btn btn-primary" onclick="navigate('send',document.querySelectorAll('.nav-item')[1])">+ New Send</button>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- ══ DASHBOARD ══ -->
+    <div class="page active" id="page-dashboard">
+
+      <!-- Warning banner -->
+      <div class="banner banner-warn">
+        <div class="banner-icon">⚠️</div>
+        <div class="banner-text"><strong>1 group needs attention</strong> — "Old Family Chat" (Personal): not a member. Last checked 6 hrs ago.</div>
+        <div class="banner-action" onclick="navigate('groups',document.querySelectorAll('.nav-item')[4])">Review →</div>
+      </div>
+
+      <!-- Stats row — top -->
+      <div class="grid-4" style="margin-bottom:20px">
+        <div class="card stat-card">
+          <div class="card-title">Total Sent Today</div>
+          <div class="stat-num" style="color:var(--accent)">231</div>
+          <div class="delta-up">↑ 12% vs yesterday</div>
+        </div>
+        <div class="card stat-card">
+          <div class="card-title">Delivery Rate</div>
+          <div class="stat-num" style="color:var(--blue)">96.5%</div>
+          <div class="delta-up">↑ 2.1% this week</div>
+        </div>
+        <div class="card stat-card">
+          <div class="card-title">Configured Groups</div>
+          <div class="stat-num" style="color:var(--purple)">13</div>
+          <div class="delta-warn">1 membership issue</div>
+        </div>
+        <div class="card stat-card">
+          <div class="card-title">Pending Schedules</div>
+          <div class="stat-num" style="color:var(--orange)">3</div>
+          <div style="font-size:11.5px;color:var(--muted)">Next in 2h 14m</div>
+        </div>
+      </div>
+
+      <!-- Sender Accounts — scrollable grid for up to 20 accounts -->
+      <div class="section-header">
+        <div class="section-title">Sender Accounts <span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:6px">20 total · 18 online · 2 offline</span></div>
+        <div class="section-link" onclick="navigate('accounts',document.querySelectorAll('.nav-item')[3])">Manage →</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px">
+        <div class="account-card">
+          <div class="account-avatar" style="background:rgba(37,211,102,.15);width:36px;height:36px;font-size:16px">🧑</div>
+          <div class="account-info">
+            <div class="account-name" style="font-size:13px">Personal</div>
+            <div class="account-num">+91 98765 43210</div>
+            <div class="account-stats">
+              <div class="account-stat"><span>142</span> sent</div>
+              <div class="account-stat"><span>4</span> groups</div>
+              <div class="account-stat"><span class="warn">1 ⚠️</span></div>
+            </div>
+          </div>
+          <div class="account-badge badge-online" style="font-size:10px">● On</div>
+        </div>
+        <div class="account-card">
+          <div class="account-avatar" style="background:rgba(79,142,247,.15);width:36px;height:36px;font-size:16px">🏢</div>
+          <div class="account-info">
+            <div class="account-name" style="font-size:13px">Org Account</div>
+            <div class="account-num">+91 91234 56789</div>
+            <div class="account-stats">
+              <div class="account-stat"><span>89</span> sent</div>
+              <div class="account-stat"><span>8</span> groups</div>
+              <div class="account-stat" style="color:var(--accent)">✅ healthy</div>
+            </div>
+          </div>
+          <div class="account-badge badge-online" style="font-size:10px">● On</div>
+        </div>
+        <div class="account-card">
+          <div class="account-avatar" style="background:rgba(155,109,255,.15);width:36px;height:36px;font-size:16px">📱</div>
+          <div class="account-info">
+            <div class="account-name" style="font-size:13px">Field Team A</div>
+            <div class="account-num">+91 99100 11122</div>
+            <div class="account-stats">
+              <div class="account-stat"><span>54</span> sent</div>
+              <div class="account-stat"><span>5</span> groups</div>
+              <div class="account-stat" style="color:var(--accent)">✅ healthy</div>
+            </div>
+          </div>
+          <div class="account-badge badge-online" style="font-size:10px">● On</div>
+        </div>
+        <div class="account-card">
+          <div class="account-avatar" style="background:rgba(255,159,67,.15);width:36px;height:36px;font-size:16px">📱</div>
+          <div class="account-info">
+            <div class="account-name" style="font-size:13px">Field Team B</div>
+            <div class="account-num">+91 99100 33344</div>
+            <div class="account-stats">
+              <div class="account-stat"><span>61</span> sent</div>
+              <div class="account-stat"><span>6</span> groups</div>
+              <div class="account-stat" style="color:var(--accent)">✅ healthy</div>
+            </div>
+          </div>
+          <div class="account-badge badge-online" style="font-size:10px">● On</div>
+        </div>
+        <div class="account-card">
+          <div class="account-avatar" style="background:rgba(255,107,107,.15);width:36px;height:36px;font-size:16px">📱</div>
+          <div class="account-info">
+            <div class="account-name" style="font-size:13px">Backup No. 1</div>
+            <div class="account-num">+91 98001 55566</div>
+            <div class="account-stats">
+              <div class="account-stat"><span>0</span> sent</div>
+              <div class="account-stat"><span>3</span> groups</div>
+              <div class="account-stat" style="color:var(--muted)">idle</div>
+            </div>
+          </div>
+          <div class="account-badge badge-offline" style="font-size:10px">● Off</div>
+        </div>
+        <div class="account-card" style="border-style:dashed;cursor:pointer;justify-content:center;flex-direction:column;align-items:center;gap:4px;padding:12px" onclick="navigate('accounts',document.querySelectorAll('.nav-item')[3])">
+          <div style="font-size:20px">➕</div>
+          <div style="font-size:11.5px;color:var(--muted)">Add Account</div>
+        </div>
+      </div>
+
+      <!-- Bottom two columns: Schedule + Activity -->
+      <div class="grid-2" style="align-items:start">
+
+        <!-- Today's Schedule -->
+        <div class="card">
+          <div class="section-header" style="margin-bottom:12px">
+            <div class="card-title" style="margin:0">Today's Schedule</div>
+            <div class="section-link" onclick="navigate('scheduler',document.querySelectorAll('.nav-item')[2])">View all →</div>
+          </div>
+          <div class="schedule-item">
+            <div class="sched-time"><strong>12:00 PM</strong>Today</div>
+            <div class="sched-dot" style="background:var(--orange)"></div>
+            <div class="sched-info">
+              <div class="sched-msg">Good afternoon everyone!</div>
+              <div class="sched-target">→ family · Personal</div>
+            </div>
+          </div>
+          <div class="schedule-item">
+            <div class="sched-time"><strong>3:00 PM</strong>Today</div>
+            <div class="sched-dot" style="background:var(--blue)"></div>
+            <div class="sched-info">
+              <div class="sched-msg">Team standup reminder</div>
+              <div class="sched-target">→ work · Org Account</div>
+            </div>
+          </div>
+          <div class="schedule-item">
+            <div class="sched-time"><strong>7:00 PM</strong>Today</div>
+            <div class="sched-dot" style="background:var(--purple)"></div>
+            <div class="sched-info">
+              <div class="sched-msg">Event reminder: Community meetup</div>
+              <div class="sched-target">→ volunteers · Org Account</div>
+            </div>
+          </div>
+          <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+            <button class="btn btn-ghost" style="width:100%;font-size:12.5px" onclick="navigate('scheduler',document.querySelectorAll('.nav-item')[2])">+ Add Schedule</button>
+          </div>
+        </div>
+
+        <!-- Recent Activity -->
+        <div class="card">
+          <div class="section-header" style="margin-bottom:4px">
+            <div class="card-title" style="margin:0">Recent Activity</div>
+            <div class="section-link" onclick="navigate('history',document.querySelectorAll('.nav-item')[6])">Full history →</div>
+          </div>
+          <div class="activity-item">
+            <div class="activity-icon act-send">✅</div>
+            <div class="activity-body">
+              <div class="activity-text">Sent <strong>"Good morning family! 🌅"</strong> to <strong>family</strong></div>
+              <div class="activity-meta">Personal · 4/4 delivered · 9:00 AM</div>
+            </div>
+          </div>
+          <div class="activity-item">
+            <div class="activity-icon act-warn">⚠️</div>
+            <div class="activity-body">
+              <div class="activity-text">Membership check: <strong>Old Family Chat</strong> — no longer a member</div>
+              <div class="activity-meta">Personal · Background check · 6 hrs ago</div>
+            </div>
+          </div>
+          <div class="activity-item">
+            <div class="activity-icon act-reply">💬</div>
+            <div class="activity-body">
+              <div class="activity-text">Reply in <strong>Work Team Alpha</strong></div>
+              <div class="activity-meta">Org Account · "Thanks for the update!" · 8:45 AM</div>
+            </div>
+          </div>
+          <div class="activity-item">
+            <div class="activity-icon act-sched">🗓</div>
+            <div class="activity-body">
+              <div class="activity-text">Schedule fired — <strong>"Weekly standup"</strong> to <strong>work</strong></div>
+              <div class="activity-meta">Org Account · 3/3 delivered · 8:00 AM</div>
+            </div>
+          </div>
+          <div class="activity-item">
+            <div class="activity-icon act-send">✅</div>
+            <div class="activity-body">
+              <div class="activity-text">Sent <strong>volunteer-update.jpg</strong> to <strong>volunteers</strong></div>
+              <div class="activity-meta">Org Account · 8/8 delivered · 7:30 AM</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ══ SEND MESSAGE ══ -->
+    <div class="page" id="page-send">
+      <div class="grid-2" style="align-items:start;gap:20px">
+        <div>
+          <div class="card">
+            <div class="section-title" style="margin-bottom:16px">📤 Compose Message</div>
+            <div class="form-group" style="margin-bottom:12px">
+              <div class="form-label">Sender Account</div>
+              <select class="form-select">
+                <option>Personal (+91 98765 43210)</option>
+                <option>Org Account (+91 91234 56789)</option>
+                <option>Auto (based on set mapping)</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin-bottom:12px">
+              <div class="form-label">Target Set</div>
+              <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">
+                <div class="chip active" onclick="toggleChip(this)">family <span style="font-size:10px;color:var(--muted)">(4)</span></div>
+                <div class="chip" onclick="toggleChip(this)">work <span style="font-size:10px;color:var(--muted)">(3)</span></div>
+                <div class="chip" onclick="toggleChip(this)">volunteers <span style="font-size:10px;color:var(--muted)">(8)</span></div>
+              </div>
+            </div>
+            <div class="form-group" style="margin-bottom:12px">
+              <div class="form-label">Message Type</div>
+              <div style="display:flex;gap:8px">
+                <div class="chip active" onclick="toggleChip(this)">💬 Text</div>
+                <div class="chip" onclick="toggleChip(this)">📷 Image</div>
+                <div class="chip" onclick="toggleChip(this)">🎥 Video</div>
+                <div class="chip" onclick="toggleChip(this)">📄 File</div>
+              </div>
+            </div>
+            <div class="form-group" style="margin-bottom:14px">
+              <div class="form-label">Message</div>
+              <textarea class="form-textarea" style="min-height:120px">Hello everyone! 🙏
+
+Just a reminder about tomorrow's community event. Hope to see you all there!
+
+Time: 10:00 AM
+Venue: Community Hall</textarea>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-schedule" style="flex:1" onclick="openModal('schedule-modal')">🗓 Schedule</button>
+              <button class="btn btn-primary" style="flex:1" onclick="openModal('presend-modal')">Review & Send →</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Target Groups Preview -->
+        <div>
+          <div class="card" style="margin-bottom:16px">
+            <div class="card-title">Message Preview</div>
+            <div style="background:var(--surface2);border-radius:10px;padding:14px;font-size:13px;line-height:1.6;margin-bottom:10px">
+              Hello everyone! 🙏<br><br>
+              Just a reminder about tomorrow's community event. Hope to see you all there!<br><br>
+              Time: 10:00 AM<br>Venue: Community Hall
+            </div>
+            <div style="font-size:12px;color:var(--muted)">Will be sent to <strong style="color:var(--text)">4 configured groups</strong> via <strong style="color:var(--text)">Personal</strong></div>
+          </div>
+          <div class="card">
+            <div class="card-title">Configured groups in "family"</div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <div style="display:flex;align-items:center;justify-content:space-between;font-size:13px;padding:6px 0">
+                <span><span class="mem-confirmed">✅</span> Our Family</span>
+                <span style="color:var(--muted);font-size:11.5px">12 members · checked 2h ago</span>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;font-size:13px;padding:6px 0">
+                <span><span class="mem-confirmed">✅</span> Family Group 2024</span>
+                <span style="color:var(--muted);font-size:11.5px">8 members · checked 2h ago</span>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;font-size:13px;padding:6px 0">
+                <span><span class="mem-inactive">🟡</span> Cousins Group</span>
+                <span style="color:var(--orange);font-size:11.5px">inactive 8d · checked 2h ago</span>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;font-size:13px;padding:6px 0">
+                <span><span class="mem-confirmed">✅</span> Parents &amp; Kids</span>
+                <span style="color:var(--muted);font-size:11.5px">6 members · checked 2h ago</span>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;font-size:13px;padding:6px 0;opacity:.5">
+                <span><span class="mem-removed">⚠️</span> <s>Old Family Chat</s></span>
+                <span style="color:var(--red);font-size:11.5px">not a member — will skip</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ SCHEDULER ══ -->
+    <div class="page" id="page-scheduler">
+      <div class="tabs">
+        <div class="tab active">Upcoming</div>
+        <div class="tab">Past</div>
+        <div class="tab">Recurring</div>
+      </div>
+      <div class="grid-2" style="align-items:start">
+        <div class="card">
+          <div class="section-header">
+            <div class="section-title">Scheduled Messages</div>
+            <button class="btn btn-primary" style="font-size:12px;padding:5px 12px" onclick="openModal('schedule-modal')">+ New</button>
+          </div>
+          <div class="schedule-item" style="padding:14px 0">
+            <div class="sched-time"><strong>12:00 PM</strong>Today</div>
+            <div class="sched-dot" style="background:var(--orange)"></div>
+            <div class="sched-info">
+              <div class="sched-msg">Good afternoon everyone! Hope your day is going well 🌞</div>
+              <div class="sched-target" style="margin-top:4px"><span class="set-tag">family</span><span style="font-size:11px;color:var(--muted)">via Personal · 4 groups</span></div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <button class="btn btn-ghost" style="font-size:11px;padding:3px 10px">Edit</button>
+              <button class="btn btn-danger" style="font-size:11px;padding:3px 10px">Cancel</button>
+            </div>
+          </div>
+          <div class="schedule-item" style="padding:14px 0">
+            <div class="sched-time"><strong>3:00 PM</strong>Today</div>
+            <div class="sched-dot" style="background:var(--blue)"></div>
+            <div class="sched-info">
+              <div class="sched-msg">Team standup reminder — please update your status 📋</div>
+              <div class="sched-target" style="margin-top:4px"><span class="set-tag">work</span><span style="font-size:11px;color:var(--muted)">via Org Account · 3 groups</span></div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <button class="btn btn-ghost" style="font-size:11px;padding:3px 10px">Edit</button>
+              <button class="btn btn-danger" style="font-size:11px;padding:3px 10px">Cancel</button>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="section-title" style="margin-bottom:16px">Create Schedule</div>
+          <div class="form-group" style="margin-bottom:12px">
+            <div class="form-label">Message</div>
+            <textarea class="form-textarea" placeholder="Your scheduled message..."></textarea>
+          </div>
+          <div class="compose-row">
+            <div class="form-group">
+              <div class="form-label">Target Set</div>
+              <select class="form-select"><option>family</option><option>work</option><option>volunteers</option></select>
+            </div>
+            <div class="form-group">
+              <div class="form-label">Account</div>
+              <select class="form-select"><option>Auto</option><option>Personal</option><option>Org Account</option></select>
+            </div>
+          </div>
+          <div class="compose-row">
+            <div class="form-group">
+              <div class="form-label">Date &amp; Time</div>
+              <input type="datetime-local" class="form-input" style="color-scheme:dark">
+            </div>
+          </div>
+          <div class="form-group" style="margin-bottom:14px">
+            <div class="form-label">Repeat</div>
+            <select class="form-select"><option>Once</option><option>Daily</option><option>Weekly</option><option>Every weekday</option></select>
+          </div>
+          <button class="btn btn-primary" style="width:100%" onclick="showToast('✅ Schedule saved!','#25d366')">Save Schedule</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ ACCOUNTS ══ -->
+    <div class="page" id="page-accounts">
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div class="account-detail-card">
+          <div class="account-avatar" style="background:rgba(37,211,102,.15);width:56px;height:56px;border-radius:14px;font-size:24px;flex-shrink:0;display:flex;align-items:center;justify-content:center">🧑</div>
+          <div style="flex:1">
+            <div class="account-detail-name">Personal <span class="account-badge badge-online" style="font-size:11px;margin-left:8px">● Online</span></div>
+            <div class="account-detail-num">+91 98765 43210 · Session active since Apr 1, 2026</div>
+            <div class="detail-stats">
+              <div class="detail-stat"><div class="detail-stat-num" style="color:var(--accent)">1,247</div><div class="detail-stat-label">Total Sent</div></div>
+              <div class="detail-stat"><div class="detail-stat-num" style="color:var(--blue)">97.2%</div><div class="detail-stat-label">Delivery Rate</div></div>
+              <div class="detail-stat"><div class="detail-stat-num" style="color:var(--purple)">5</div><div class="detail-stat-label">Configured Groups</div></div>
+              <div class="detail-stat" style="border:1px solid rgba(255,159,67,.3)"><div class="detail-stat-num" style="color:var(--orange)">1</div><div class="detail-stat-label" style="color:var(--orange)">⚠️ Needs Attention</div></div>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <button class="btn btn-ghost" style="font-size:12px">Settings</button>
+            <button class="btn btn-danger" style="font-size:12px">Disconnect</button>
+          </div>
+        </div>
+        <div class="account-detail-card">
+          <div class="account-avatar" style="background:rgba(79,142,247,.15);width:56px;height:56px;border-radius:14px;font-size:24px;flex-shrink:0;display:flex;align-items:center;justify-content:center">🏢</div>
+          <div style="flex:1">
+            <div class="account-detail-name">Org Account <span class="account-badge badge-online" style="font-size:11px;margin-left:8px">● Online</span></div>
+            <div class="account-detail-num">+91 91234 56789 · Session active since Apr 3, 2026</div>
+            <div class="detail-stats">
+              <div class="detail-stat"><div class="detail-stat-num" style="color:var(--accent)">892</div><div class="detail-stat-label">Total Sent</div></div>
+              <div class="detail-stat"><div class="detail-stat-num" style="color:var(--blue)">95.8%</div><div class="detail-stat-label">Delivery Rate</div></div>
+              <div class="detail-stat"><div class="detail-stat-num" style="color:var(--purple)">8</div><div class="detail-stat-label">Configured Groups</div></div>
+              <div class="detail-stat" style="border:1px solid rgba(37,211,102,.3)"><div class="detail-stat-num" style="color:var(--accent)">✅</div><div class="detail-stat-label" style="color:var(--accent)">All Healthy</div></div>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <button class="btn btn-ghost" style="font-size:12px">Settings</button>
+            <button class="btn btn-danger" style="font-size:12px">Disconnect</button>
+          </div>
+        </div>
+        <div class="card" style="border-style:dashed;cursor:pointer;text-align:center;padding:24px" onclick="showToast('📱 QR flow coming soon!','#4f8ef7')">
+          <div style="font-size:28px;margin-bottom:8px">➕</div>
+          <div style="font-size:14px;font-weight:600;margin-bottom:4px">Add Sender Account</div>
+          <div style="font-size:12.5px;color:var(--muted)">Scan QR code to link a new WhatsApp number</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ GROUPS & SETS ══ -->
+    <div class="page" id="page-groups">
+      <div class="tabs">
+        <div class="tab active" onclick="switchTab(this,'gtab-configured')">Configured Groups</div>
+        <div class="tab" onclick="switchTab(this,'gtab-sets')">Sets</div>
+        <div class="tab" onclick="switchTab(this,'gtab-mapping')">Account Mapping</div>
+        <div class="tab" onclick="switchTab(this,'gtab-settings')">Check Settings</div>
+      </div>
+
+      <!-- TAB: CONFIGURED GROUPS -->
+      <div id="gtab-configured">
+        <div class="banner banner-warn" style="margin-bottom:14px">
+          <div class="banner-icon">⚠️</div>
+          <div class="banner-text"><strong>Old Family Chat</strong> (Personal) — bot number is no longer a member. Last verified 6 hrs ago.</div>
+          <div class="banner-action" onclick="showToast('🗑 Removed from configured groups','#ff6b6b')">Remove Group</div>
+        </div>
+        <div class="section-header">
+          <div style="display:flex;gap:8px;align-items:center">
+            <input class="form-input" placeholder="Search configured groups..." style="width:220px;padding:7px 12px">
+            <select class="form-select" style="width:150px;padding:7px 12px">
+              <option>All Accounts</option><option>Personal</option><option>Org Account</option>
+            </select>
+            <select class="form-select" style="width:150px;padding:7px 12px">
+              <option>All Status</option><option>✅ Confirmed</option><option>⚠️ Not a Member</option><option>🟡 Inactive</option><option>❓ Unverified</option>
+            </select>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost" style="font-size:12px" onclick="simulateVerify()">🔍 Verify All Now</button>
+            <button class="btn btn-primary" style="font-size:12px" onclick="openModal('discover-modal')">+ Discover &amp; Add Groups</button>
+          </div>
+        </div>
+        <div class="card" style="padding:0;overflow:hidden">
+          <table class="group-table">
+            <thead>
+              <tr>
+                <th><input type="checkbox" class="checkbox"></th>
+                <th>Group Name</th>
+                <th>Account</th>
+                <th>Membership</th>
+                <th>Last Active</th>
+                <th>Sets</th>
+                <th>Last Verified</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><input type="checkbox" class="checkbox" checked></td>
+                <td><strong>Our Family</strong><div style="font-size:10.5px;color:var(--muted)">120363001@g.us</div></td>
+                <td style="font-size:12px">🧑 Personal</td>
+                <td><span class="pill pill-green">✅ Confirmed</span></td>
+                <td><span class="pill pill-green">2 hrs ago</span></td>
+                <td><span class="set-tag">family</span></td>
+                <td style="font-size:11.5px;color:var(--muted)">2h ago</td>
+                <td><span class="section-link" style="font-size:12px">Edit</span></td>
+              </tr>
+              <tr>
+                <td><input type="checkbox" class="checkbox" checked></td>
+                <td><strong>Family Group 2024</strong><div style="font-size:10.5px;color:var(--muted)">120363002@g.us</div></td>
+                <td style="font-size:12px">🧑 Personal</td>
+                <td><span class="pill pill-green">✅ Confirmed</span></td>
+                <td><span class="pill pill-green">1 day ago</span></td>
+                <td><span class="set-tag">family</span></td>
+                <td style="font-size:11.5px;color:var(--muted)">2h ago</td>
+                <td><span class="section-link" style="font-size:12px">Edit</span></td>
+              </tr>
+              <tr>
+                <td><input type="checkbox" class="checkbox"></td>
+                <td><strong>Cousins Group</strong><div style="font-size:10.5px;color:var(--muted)">120363003@g.us</div></td>
+                <td style="font-size:12px">🧑 Personal</td>
+                <td><span class="pill pill-yellow">🟡 Inactive</span></td>
+                <td><span class="pill pill-yellow">8 days ago</span></td>
+                <td><span class="set-tag">family</span></td>
+                <td style="font-size:11.5px;color:var(--muted)">2h ago</td>
+                <td><span class="section-link" style="font-size:12px">Edit</span></td>
+              </tr>
+              <tr style="opacity:.7">
+                <td><input type="checkbox" class="checkbox"></td>
+                <td><strong style="text-decoration:line-through;color:var(--red)">Old Family Chat</strong><div style="font-size:10.5px;color:var(--muted)">120363004@g.us</div></td>
+                <td style="font-size:12px">🧑 Personal</td>
+                <td><span class="pill pill-red">⚠️ Not a Member</span></td>
+                <td><span class="pill pill-red">45 days ago</span></td>
+                <td style="color:var(--muted);font-size:12px">—</td>
+                <td style="font-size:11.5px;color:var(--muted)">6h ago</td>
+                <td>
+                  <span class="section-link" style="font-size:12px;color:var(--orange)" onclick="showToast('🔍 Re-verifying...','#ff9f43')">Re-check</span>
+                  &nbsp;<span class="section-link" style="font-size:12px;color:var(--red)" onclick="showToast('🗑 Removed','#ff6b6b')">Remove</span>
+                </td>
+              </tr>
+              <tr>
+                <td><input type="checkbox" class="checkbox"></td>
+                <td><strong>Work Team Alpha</strong><div style="font-size:10.5px;color:var(--muted)">120363005@g.us</div></td>
+                <td style="font-size:12px">🏢 Org</td>
+                <td><span class="pill pill-green">✅ Confirmed</span></td>
+                <td><span class="pill pill-green">30 min ago</span></td>
+                <td><span class="set-tag">work</span></td>
+                <td style="font-size:11.5px;color:var(--muted)">2h ago</td>
+                <td><span class="section-link" style="font-size:12px">Edit</span></td>
+              </tr>
+              <tr>
+                <td><input type="checkbox" class="checkbox"></td>
+                <td><strong>Volunteer Network</strong><div style="font-size:10.5px;color:var(--muted)">120363008@g.us</div></td>
+                <td style="font-size:12px">🏢 Org</td>
+                <td><span class="pill pill-muted">❓ Unverified</span></td>
+                <td><span class="pill pill-green">2 days ago</span></td>
+                <td><span class="set-tag">volunteers</span></td>
+                <td style="font-size:11.5px;color:var(--muted)">Never</td>
+                <td><span class="section-link" style="font-size:12px;color:var(--blue)" onclick="showToast('🔍 Verifying...','#4f8ef7')">Verify</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <!-- verify progress -->
+        <div id="verify-progress" style="display:none;margin-top:12px">
+          <div class="card" style="padding:14px 18px">
+            <div style="display:flex;align-items:center;gap:10px;font-size:13px">
+              <span class="spinning">🔍</span>
+              <span id="verify-label" style="color:var(--muted)">Checking membership for all groups…</span>
+            </div>
+            <div class="progress-bar-wrap" style="margin-top:8px"><div class="progress-bar" id="verify-fill" style="width:0%;background:var(--blue)"></div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: SETS -->
+      <div id="gtab-sets" style="display:none">
+        <div class="section-header">
+          <div class="section-title">Group Sets</div>
+          <button class="btn btn-primary" style="font-size:12px;padding:6px 14px" onclick="showToast('+ New set!','#25d366')">+ New Set</button>
+        </div>
+        <div class="sets-grid">
+          <div class="set-card">
+            <div class="set-card-header"><div class="set-name">family</div><div style="font-size:11px;color:var(--muted)">4 groups · 🧑 Personal</div></div>
+            <div style="font-size:11.5px;color:var(--orange);margin-bottom:6px">⚠️ 1 group has membership issue</div>
+            <div class="set-groups">
+              <div class="set-group-chip">Our Family</div>
+              <div class="set-group-chip">Family 2024</div>
+              <div class="set-group-chip">Cousins</div>
+              <div class="set-group-chip">Parents &amp; Kids</div>
+              <div class="set-group-chip warn">⚠️ Old Family Chat</div>
+            </div>
+          </div>
+          <div class="set-card">
+            <div class="set-card-header"><div class="set-name">work</div><div style="font-size:11px;color:var(--muted)">3 groups · 🏢 Org</div></div>
+            <div style="font-size:11.5px;color:var(--accent);margin-bottom:6px">✅ All healthy</div>
+            <div class="set-groups">
+              <div class="set-group-chip">Team Alpha</div>
+              <div class="set-group-chip">Standup</div>
+              <div class="set-group-chip">Leadership</div>
+            </div>
+          </div>
+          <div class="set-card">
+            <div class="set-card-header"><div class="set-name">volunteers</div><div style="font-size:11px;color:var(--muted)">8 groups · 🏢 Org</div></div>
+            <div style="font-size:11.5px;color:var(--muted);margin-bottom:6px">❓ 2 groups unverified</div>
+            <div class="set-groups">
+              <div class="set-group-chip">Volunteer Net</div>
+              <div class="set-group-chip">Zone A</div>
+              <div class="set-group-chip">Zone B</div>
+              <div class="set-group-chip">+5 more</div>
+            </div>
+          </div>
+          <div class="set-card" style="border-style:dashed;display:flex;align-items:center;justify-content:center;min-height:100px" onclick="showToast('+ New set!','#25d366')">
+            <div style="text-align:center;color:var(--muted)"><div style="font-size:22px">➕</div><div style="font-size:12.5px;margin-top:4px">New Set</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: MAPPING -->
+      <div id="gtab-mapping" style="display:none">
+        <div class="card">
+          <div class="section-title" style="margin-bottom:4px">Account → Set Mapping</div>
+          <div style="font-size:12.5px;color:var(--muted);margin-bottom:18px">Which sender account is used when sending to each set. The bot only uses configured groups within each set.</div>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <div style="display:flex;align-items:center;gap:12px;padding:12px;background:var(--surface2);border-radius:8px">
+              <div style="font-size:14px;font-weight:600;width:120px">family</div>
+              <div style="color:var(--muted);font-size:18px">→</div>
+              <select class="form-select" style="width:200px"><option selected>🧑 Personal</option><option>🏢 Org Account</option><option>Auto (least used)</option></select>
+              <div style="font-size:12px;color:var(--muted);flex:1">4 configured groups · <span style="color:var(--orange)">1 issue</span></div>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;padding:12px;background:var(--surface2);border-radius:8px">
+              <div style="font-size:14px;font-weight:600;width:120px">work</div>
+              <div style="color:var(--muted);font-size:18px">→</div>
+              <select class="form-select" style="width:200px"><option>🧑 Personal</option><option selected>🏢 Org Account</option><option>Auto (least used)</option></select>
+              <div style="font-size:12px;color:var(--muted);flex:1">3 configured groups · <span style="color:var(--accent)">all healthy</span></div>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;padding:12px;background:var(--surface2);border-radius:8px">
+              <div style="font-size:14px;font-weight:600;width:120px">volunteers</div>
+              <div style="color:var(--muted);font-size:18px">→</div>
+              <select class="form-select" style="width:200px"><option>🧑 Personal</option><option selected>🏢 Org Account</option><option>Auto (least used)</option></select>
+              <div style="font-size:12px;color:var(--muted);flex:1">8 configured groups · <span style="color:var(--muted)">2 unverified</span></div>
+            </div>
+          </div>
+          <button class="btn btn-primary" style="margin-top:16px" onclick="showToast('✅ Mapping saved!','#25d366')">Save Mapping</button>
+        </div>
+      </div>
+
+      <!-- TAB: CHECK SETTINGS -->
+      <div id="gtab-settings" style="display:none">
+        <div class="card">
+          <div class="section-title" style="margin-bottom:4px">Membership Check Settings</div>
+          <div style="font-size:12.5px;color:var(--muted);margin-bottom:20px">Controls when and how often the bot verifies that each configured number is still a member of each group.</div>
+
+          <div style="display:flex;flex-direction:column;gap:18px">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:20px;padding:16px;background:var(--surface2);border-radius:10px">
+              <div>
+                <div style="font-size:13.5px;font-weight:600;margin-bottom:4px">Background Interval Check</div>
+                <div style="font-size:12.5px;color:var(--muted)">Automatically checks membership for all configured groups at a regular interval. Updates status indicators in the dashboard.</div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;flex-shrink:0">
+                <select class="form-select" style="width:160px">
+                  <option>Every 6 hours</option>
+                  <option>Every 12 hours</option>
+                  <option>Every 24 hours</option>
+                  <option>Disabled</option>
+                </select>
+                <div style="font-size:11px;color:var(--muted)">Last run: 2h ago · Next: 4h</div>
+              </div>
+            </div>
+
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:20px;padding:16px;background:var(--surface2);border-radius:10px">
+              <div>
+                <div style="font-size:13.5px;font-weight:600;margin-bottom:4px">Pre-Send Verification</div>
+                <div style="font-size:12.5px;color:var(--muted)">Always check membership right before every send from this console. Shows a confirmation dialog if any group has an issue before dispatching.</div>
+              </div>
+              <div style="flex-shrink:0">
+                <div style="display:flex;align-items:center;gap:8px;cursor:pointer" onclick="toggleSwitch(this)">
+                  <div style="width:40px;height:22px;background:var(--accent);border-radius:11px;position:relative;transition:background .2s" id="presend-switch">
+                    <div style="width:18px;height:18px;background:white;border-radius:50%;position:absolute;top:2px;right:2px;transition:right .2s"></div>
+                  </div>
+                  <span style="font-size:13px;color:var(--accent);font-weight:600">On</span>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:20px;padding:16px;background:var(--surface2);border-radius:10px">
+              <div>
+                <div style="font-size:13.5px;font-weight:600;margin-bottom:4px">On Membership Issue</div>
+                <div style="font-size:12.5px;color:var(--muted)">What to do when a group is found to have a membership problem during a send.</div>
+              </div>
+              <select class="form-select" style="width:200px;flex-shrink:0">
+                <option>Skip group, continue send</option>
+                <option>Block send, show warning</option>
+                <option>Ask me each time</option>
+              </select>
+            </div>
+
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:20px;padding:16px;background:var(--surface2);border-radius:10px">
+              <div>
+                <div style="font-size:13.5px;font-weight:600;margin-bottom:4px">Alert on Membership Loss</div>
+                <div style="font-size:12.5px;color:var(--muted)">Show a dashboard banner and badge on Groups & Sets when a configured group is found to have a membership issue.</div>
+              </div>
+              <div style="flex-shrink:0">
+                <div style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                  <div style="width:40px;height:22px;background:var(--accent);border-radius:11px;position:relative">
+                    <div style="width:18px;height:18px;background:white;border-radius:50%;position:absolute;top:2px;right:2px"></div>
+                  </div>
+                  <span style="font-size:13px;color:var(--accent);font-weight:600">On</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <button class="btn btn-primary" style="margin-top:18px" onclick="showToast('✅ Settings saved!','#25d366')">Save Settings</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ CONTACTS ══ -->
+    <div class="page" id="page-contacts">
+      <div class="section-header">
+        <input class="form-input" placeholder="Search contacts..." style="width:240px">
+        <button class="btn btn-primary" style="font-size:12px">+ Add Contact</button>
+      </div>
+      <div class="card" style="padding:0;overflow:hidden">
+        <table class="group-table">
+          <thead><tr><th>Name</th><th>Number</th><th>Last Sent</th><th>Actions</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Rahul</strong></td><td style="color:var(--muted)">+91 98765 00001</td><td style="font-size:12px;color:var(--muted)">2 days ago</td><td><span class="section-link">Edit</span> · <span style="color:var(--red);cursor:pointer;font-size:12px">Delete</span></td></tr>
+            <tr><td><strong>Priya</strong></td><td style="color:var(--muted)">+91 98765 00002</td><td style="font-size:12px;color:var(--muted)">Today</td><td><span class="section-link">Edit</span> · <span style="color:var(--red);cursor:pointer;font-size:12px">Delete</span></td></tr>
+            <tr><td><strong>Amit</strong></td><td style="color:var(--muted)">+91 98765 00003</td><td style="font-size:12px;color:var(--muted)">1 week ago</td><td><span class="section-link">Edit</span> · <span style="color:var(--red);cursor:pointer;font-size:12px">Delete</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ══ HISTORY ══ -->
+    <div class="page" id="page-history">
+      <div class="section-header">
+        <div style="display:flex;gap:8px">
+          <input class="form-input" placeholder="Search..." style="width:180px;padding:7px 12px">
+          <select class="form-select" style="width:130px;padding:7px 12px"><option>All Accounts</option><option>Personal</option><option>Org Account</option></select>
+          <select class="form-select" style="width:120px;padding:7px 12px"><option>All Status</option><option>Success</option><option>Partial</option><option>Failed</option></select>
+        </div>
+        <div style="font-size:12.5px;color:var(--muted)">231 sends today · 2 with issues</div>
+      </div>
+      <div class="card" style="padding:0;overflow:hidden">
+        <table class="group-table">
+          <thead><tr><th>Time</th><th>Message</th><th>Target</th><th>Account</th><th>Groups</th><th>Result</th><th></th></tr></thead>
+          <tbody>
+            <tr>
+              <td style="font-size:12px;color:var(--muted)">10:15 AM</td>
+              <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Good morning family! 🌅</td>
+              <td><span class="set-tag">family</span></td>
+              <td style="font-size:12px">🧑 Personal</td>
+              <td style="font-size:12px;color:var(--muted)">4 configured</td>
+              <td><span class="pill pill-green">4/4 ✓</span></td>
+              <td><span class="section-link" style="font-size:12px">Details</span></td>
+            </tr>
+            <tr>
+              <td style="font-size:12px;color:var(--muted)">9:00 AM</td>
+              <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Weekly standup reminder</td>
+              <td><span class="set-tag">work</span></td>
+              <td style="font-size:12px">🏢 Org</td>
+              <td style="font-size:12px;color:var(--muted)">3 configured</td>
+              <td><span class="pill pill-green">3/3 ✓</span></td>
+              <td><span class="section-link" style="font-size:12px">Details</span></td>
+            </tr>
+            <tr>
+              <td style="font-size:12px;color:var(--muted)">8:30 AM</td>
+              <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">volunteer-update.jpg</td>
+              <td><span class="set-tag">volunteers</span></td>
+              <td style="font-size:12px">🏢 Org</td>
+              <td style="font-size:12px;color:var(--muted)">8 configured</td>
+              <td><span class="pill pill-yellow">7/8 ⚠</span></td>
+              <td><span class="section-link" style="font-size:12px;color:var(--orange)">Retry</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ══ ANALYTICS ══ -->
+    <div class="page" id="page-analytics">
+      <div class="grid-2" style="margin-bottom:16px">
+        <div class="card">
+          <div class="card-title">Sends Per Day</div>
+          <div class="bar-chart">
+            <div class="bar-col"><div class="bar-val">142</div><div class="bar" style="height:85%;background:var(--accent)"></div><div class="bar-label">Mon</div></div>
+            <div class="bar-col"><div class="bar-val">98</div><div class="bar" style="height:58%;background:var(--accent)"></div><div class="bar-label">Tue</div></div>
+            <div class="bar-col"><div class="bar-val">201</div><div class="bar" style="height:100%;background:var(--accent)"></div><div class="bar-label">Wed</div></div>
+            <div class="bar-col"><div class="bar-val">167</div><div class="bar" style="height:83%;background:var(--accent)"></div><div class="bar-label">Thu</div></div>
+            <div class="bar-col"><div class="bar-val">78</div><div class="bar" style="height:39%;background:var(--accent)"></div><div class="bar-label">Fri</div></div>
+            <div class="bar-col"><div class="bar-val">110</div><div class="bar" style="height:55%;background:var(--blue)"></div><div class="bar-label">Sat</div></div>
+            <div class="bar-col"><div class="bar-val">231</div><div class="bar" style="height:100%;background:var(--purple)"></div><div class="bar-label">Sun</div></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Delivery Rate by Account</div>
+          <div class="donut-row" style="margin-top:10px">
+            <div class="donut-wrap"><svg viewBox="0 0 36 36" width="100" height="100"><circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--surface2)" stroke-width="3"/><circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--accent)" stroke-width="3" stroke-dasharray="97.2 2.8"/></svg><div class="donut-center"><div class="donut-pct" style="color:var(--accent)">97%</div><div class="donut-sub">Personal</div></div></div>
+            <div class="donut-wrap"><svg viewBox="0 0 36 36" width="100" height="100"><circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--surface2)" stroke-width="3"/><circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--blue)" stroke-width="3" stroke-dasharray="95.8 4.2"/></svg><div class="donut-center"><div class="donut-pct" style="color:var(--blue)">96%</div><div class="donut-sub">Org</div></div></div>
+            <div class="legend">
+              <div class="legend-item"><div class="legend-dot" style="background:var(--accent)"></div>Personal — 1,247 sent</div>
+              <div class="legend-item"><div class="legend-dot" style="background:var(--blue)"></div>Org Account — 892 sent</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="grid-3" style="margin-bottom:16px">
+        <div class="card"><div class="card-title">🔥 Most Engaged</div><div style="font-size:16px;font-weight:700;margin:8px 0">Volunteer Network</div><div style="font-size:12.5px;color:var(--muted)">38% reply rate</div><div class="progress-bar-wrap" style="margin-top:8px"><div class="progress-bar" style="width:38%;background:var(--purple)"></div></div></div>
+        <div class="card"><div class="card-title">⏰ Best Time to Send</div><div style="font-size:16px;font-weight:700;margin:8px 0">9:00 – 10:00 AM</div><div style="font-size:12.5px;color:var(--muted)">Highest reply rate</div></div>
+        <div class="card"><div class="card-title">❄️ Inactive Configured</div><div style="font-size:16px;font-weight:700;margin:8px 0;color:var(--orange)">2 groups</div><div style="font-size:12.5px;color:var(--muted)">No activity 30d+</div><div class="section-link" style="font-size:12px;margin-top:6px;display:inline-block">Review →</div></div>
+      </div>
+    </div>
+
+    <!-- ══ LOGS ══ -->
+    <div class="page" id="page-logs">
+      <div class="section-header">
+        <div style="display:flex;gap:8px;align-items:center">
+          <div class="chip active">All</div><div class="chip">Sends</div><div class="chip">Errors</div><div class="chip">Membership</div><div class="chip">Schedules</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <div style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--accent)"><div style="width:7px;height:7px;background:var(--accent);border-radius:50%;animation:pulse 1.5s infinite"></div>Live</div>
+          <button class="btn btn-ghost" style="font-size:12px">Download</button>
+        </div>
+      </div>
+      <div class="card" style="font-family:monospace;font-size:12px;line-height:1.8;background:var(--bg);max-height:500px;overflow-y:auto">
+        <div><span style="color:var(--muted)">[2026-04-14T10:32:15Z]</span> <span style="color:var(--accent)">[SEND]</span> Pre-send check: family set — checking 5 configured groups</div>
+        <div><span style="color:var(--muted)">[2026-04-14T10:32:15Z]</span> <span style="color:var(--accent)">[CHECK]</span> ✓ "Our Family" — member confirmed</div>
+        <div><span style="color:var(--muted)">[2026-04-14T10:32:16Z]</span> <span style="color:var(--accent)">[CHECK]</span> ✓ "Family Group 2024" — member confirmed</div>
+        <div><span style="color:var(--muted)">[2026-04-14T10:32:16Z]</span> <span style="color:var(--orange)">[CHECK]</span> ⚠ "Old Family Chat" — not a member, skipping</div>
+        <div><span style="color:var(--muted)">[2026-04-14T10:32:17Z]</span> <span style="color:var(--accent)">[SEND]</span> Dispatching to 4/5 groups (1 skipped)</div>
+        <div><span style="color:var(--muted)">[2026-04-14T10:32:18Z]</span> <span style="color:var(--accent)">[SEND]</span> ✓ Delivered to "Our Family"</div>
+        <div><span style="color:var(--muted)">[2026-04-14T04:00:00Z]</span> <span style="color:var(--blue)">[BGCHECK]</span> Background membership check started — 13 configured groups</div>
+        <div><span style="color:var(--muted)">[2026-04-14T04:00:08Z]</span> <span style="color:var(--red)">[BGCHECK]</span> ✗ "Old Family Chat" — not a member! Group flagged ⚠️</div>
+        <div><span style="color:var(--muted)">[2026-04-14T04:00:12Z]</span> <span style="color:var(--blue)">[BGCHECK]</span> Complete — 12 confirmed, 1 issue found</div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<!-- ══ MODAL: PRE-SEND CHECK ══ -->
+<div class="modal-overlay" id="presend-modal" onclick="if(event.target===this)closeModal('presend-modal')">
+  <div class="modal">
+    <div class="modal-title">🔍 Pre-Send Membership Check <span class="modal-close" onclick="closeModal('presend-modal')">✕</span></div>
+    <div class="modal-sub">Verifying membership for all configured groups in <strong>family</strong> set before sending.</div>
+    <div>
+      <div class="check-row ok"><span class="check-icon">✅</span><div class="check-info"><div class="check-name">Our Family</div><div class="check-reason">Member confirmed · 12 participants</div></div><span style="font-size:11px;color:var(--accent)">Will send</span></div>
+      <div class="check-row ok"><span class="check-icon">✅</span><div class="check-info"><div class="check-name">Family Group 2024</div><div class="check-reason">Member confirmed · 8 participants</div></div><span style="font-size:11px;color:var(--accent)">Will send</span></div>
+      <div class="check-row warn"><span class="check-icon">🟡</span><div class="check-info"><div class="check-name">Cousins Group</div><div class="check-reason">Member confirmed but inactive 8 days</div></div><span style="font-size:11px;color:var(--orange)">Will send</span></div>
+      <div class="check-row ok"><span class="check-icon">✅</span><div class="check-info"><div class="check-name">Parents &amp; Kids</div><div class="check-reason">Member confirmed · 6 participants</div></div><span style="font-size:11px;color:var(--accent)">Will send</span></div>
+      <div class="check-row bad"><span class="check-icon">⚠️</span><div class="check-info"><div class="check-name">Old Family Chat</div><div class="check-reason">Not a member — number was removed or left</div></div><span class="check-skip" onclick="showToast('Skipped','#ff6b6b')">Skip ✕</span></div>
+    </div>
+    <div style="margin-top:14px;padding:10px 14px;background:var(--surface2);border-radius:8px;font-size:12.5px;color:var(--muted)">
+      ✅ <strong style="color:var(--text)">4 groups</strong> will receive the message &nbsp;·&nbsp; ⚠️ <strong style="color:var(--orange)">1 group</strong> will be skipped
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('presend-modal')">Cancel</button>
+      <button class="btn btn-warn" onclick="closeModal('presend-modal');showToast('🔍 Re-verifying all...','#ff9f43')">Re-check All</button>
+      <button class="btn btn-primary" onclick="closeModal('presend-modal');simulateSend()">Send to 4 Groups →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL: DISCOVER GROUPS ══ -->
+<div class="modal-overlay" id="discover-modal" onclick="if(event.target===this)closeModal('discover-modal')">
+  <div class="modal wide">
+    <div class="modal-title">🔎 Discover &amp; Add Groups <span class="modal-close" onclick="closeModal('discover-modal')">✕</span></div>
+    <div class="modal-sub">All groups the selected account belongs to on WhatsApp. Select which ones to bring into the dashboard.</div>
+    <div class="compose-row" style="margin-bottom:14px">
+      <div class="form-group">
+        <div class="form-label">Account</div>
+        <select class="form-select"><option>🧑 Personal (+91 98765 43210)</option><option>🏢 Org Account (+91 91234 56789)</option></select>
+      </div>
+      <div class="form-group">
+        <div class="form-label">Filter</div>
+        <input class="form-input" placeholder="Search groups...">
+      </div>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Showing 47 groups · 5 already configured · 42 available to add</div>
+    <div style="max-height:340px;overflow-y:auto;display:flex;flex-direction:column;gap:6px">
+      <div style="font-size:11px;color:var(--muted);padding:4px 2px;text-transform:uppercase;letter-spacing:.8px">Already Configured</div>
+      <div class="discover-row" style="opacity:.5;cursor:default">
+        <div class="dr-check" style="background:var(--accent);border-color:var(--accent);color:#000">✓</div>
+        <div style="flex:1"><div class="dr-name">Our Family</div><div class="dr-meta">12 members · active 2h ago</div></div>
+        <span class="pill pill-green" style="font-size:10px">Configured</span>
+      </div>
+      <div class="discover-row" style="opacity:.5;cursor:default">
+        <div class="dr-check" style="background:var(--accent);border-color:var(--accent);color:#000">✓</div>
+        <div style="flex:1"><div class="dr-name">Family Group 2024</div><div class="dr-meta">8 members · active 1d ago</div></div>
+        <span class="pill pill-green" style="font-size:10px">Configured</span>
+      </div>
+      <div style="font-size:11px;color:var(--muted);padding:10px 2px 4px;text-transform:uppercase;letter-spacing:.8px">Available to Add</div>
+      <div class="discover-row selected" onclick="toggleDiscover(this)">
+        <div class="dr-check">✓</div>
+        <div style="flex:1"><div class="dr-name">Extended Family</div><div class="dr-meta">34 members · active 3h ago</div></div>
+        <span class="pill pill-green" style="font-size:10px">🟢 Active</span>
+      </div>
+      <div class="discover-row" onclick="toggleDiscover(this)">
+        <div class="dr-check"></div>
+        <div style="flex:1"><div class="dr-name">School Batch 2010</div><div class="dr-meta">89 members · active 4h ago</div></div>
+        <span class="pill pill-green" style="font-size:10px">🟢 Active</span>
+      </div>
+      <div class="discover-row" onclick="toggleDiscover(this)">
+        <div class="dr-check"></div>
+        <div style="flex:1"><div class="dr-name">Neighbours Society</div><div class="dr-meta">22 members · active 2d ago</div></div>
+        <span class="pill pill-yellow" style="font-size:10px">🟡 Quiet</span>
+      </div>
+      <div class="discover-row" onclick="toggleDiscover(this)">
+        <div class="dr-check"></div>
+        <div style="flex:1"><div class="dr-name">Old Office Gang</div><div class="dr-meta">11 members · active 40d ago</div></div>
+        <span class="pill pill-red" style="font-size:10px">🔴 Inactive</span>
+      </div>
+      <div class="discover-row" onclick="toggleDiscover(this)">
+        <div class="dr-check"></div>
+        <div style="flex:1"><div class="dr-name">Cricket Team 2023</div><div class="dr-meta">16 members · active 5d ago</div></div>
+        <span class="pill pill-yellow" style="font-size:10px">🟡 Quiet</span>
+      </div>
+      <div class="discover-row" onclick="toggleDiscover(this)">
+        <div class="dr-check"></div>
+        <div style="flex:1"><div class="dr-name">Apartment Block C</div><div class="dr-meta">31 members · active 1h ago</div></div>
+        <span class="pill pill-green" style="font-size:10px">🟢 Active</span>
+      </div>
+    </div>
+    <div style="margin-top:14px;padding:10px 14px;background:var(--surface2);border-radius:8px;font-size:12.5px;color:var(--muted)">
+      <strong style="color:var(--text)">1 group selected</strong> to add — will be stored by JID, not name
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('discover-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="closeModal('discover-modal');showToast('✅ 1 group added & verified!','#25d366')">Add Selected Groups →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL: SCHEDULE ══ -->
+<div class="modal-overlay" id="schedule-modal" onclick="if(event.target===this)closeModal('schedule-modal')">
+  <div class="modal">
+    <div class="modal-title">🗓 Schedule Message <span class="modal-close" onclick="closeModal('schedule-modal')">✕</span></div>
+    <div class="modal-sub">Choose when to send this message.</div>
+    <div class="form-group" style="margin-bottom:12px">
+      <div class="form-label">Date &amp; Time</div>
+      <input type="datetime-local" class="form-input" style="color-scheme:dark">
+    </div>
+    <div class="form-group" style="margin-bottom:12px">
+      <div class="form-label">Repeat</div>
+      <select class="form-select"><option>Once</option><option>Daily</option><option>Weekly</option><option>Every weekday</option></select>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('schedule-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="closeModal('schedule-modal');showToast('✅ Scheduled!','#25d366')">Save Schedule</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"><span id="toast-msg">Done!</span></div>
+
+<script>
+  const pagesMeta = {
+    dashboard: { title:'Dashboard', sub:'Monday, 14 Apr 2026 · 10:32 AM' },
+    send:      { title:'Send Message', sub:'Compose and send to your configured groups' },
+    scheduler: { title:'Scheduler', sub:'Manage scheduled messages' },
+    accounts:  { title:'Sender Accounts', sub:'Manage WhatsApp sender accounts' },
+    groups:    { title:'Groups & Sets', sub:'Configure groups, sets, and account mapping' },
+    contacts:  { title:'Contacts', sub:'Saved contact list' },
+    history:   { title:'Send History', sub:'All sends and delivery results' },
+    analytics: { title:'Analytics', sub:'Performance insights' },
+    logs:      { title:'Logs', sub:'Live bot activity' },
+  };
+
+  function navigate(page, el) {
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    document.getElementById('page-' + page).classList.add('active');
+    if (el) el.classList.add('active');
+    const m = pagesMeta[page];
+    document.getElementById('topbar-title').textContent = m.title;
+    document.getElementById('topbar-sub').textContent = m.sub;
+  }
+
+  function switchTab(el, tabId) {
+    const page = el.closest('.page');
+    page.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    el.classList.add('active');
+    page.querySelectorAll('[id^="gtab-"]').forEach(t => t.style.display = 'none');
+    document.getElementById(tabId).style.display = 'block';
+  }
+
+  function openModal(id) { document.getElementById(id).classList.add('open'); }
+  function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+  function toggleChip(el) { el.classList.toggle('active'); }
+
+  function toggleDiscover(el) {
+    el.classList.toggle('selected');
+    const check = el.querySelector('.dr-check');
+    check.textContent = el.classList.contains('selected') ? '✓' : '';
+  }
+
+  function updateCharCount() {
+    document.getElementById('char-count').textContent = document.getElementById('compose-msg').value.length;
+  }
+
+  function simulateSend() {
+    const prog = document.getElementById('send-progress');
+    const fill = document.getElementById('progress-fill');
+    const label = document.getElementById('progress-label');
+    prog.style.display = 'block';
+    const groups = ['Our Family','Family Group 2024','Cousins Group','Parents & Kids'];
+    let i = 0;
+    const step = () => {
+      if (i >= groups.length) {
+        showToast('✅ Sent to 4/4 groups!','#25d366');
+        setTimeout(() => { prog.style.display = 'none'; fill.style.width = '0%'; }, 2500);
+        return;
+      }
+      label.textContent = 'Sending to ' + groups[i] + '…';
+      fill.style.width = ((i+1)/groups.length*100) + '%';
+      i++;
+      setTimeout(step, 600);
+    };
+    step();
+  }
+
+  function simulateVerify() {
+    const wrap = document.getElementById('verify-progress');
+    const fill = document.getElementById('verify-fill');
+    const label = document.getElementById('verify-label');
+    wrap.style.display = 'block';
+    const groups = ['Our Family','Family Group 2024','Cousins Group','Work Team Alpha','Volunteer Network','Old Family Chat'];
+    let i = 0;
+    const step = () => {
+      if (i >= groups.length) {
+        label.textContent = '✅ Done — 5 confirmed, 1 issue found (Old Family Chat)';
+        fill.style.background = 'var(--accent)';
+        showToast('🔍 Verification complete — 1 issue found','#ff9f43');
+        setTimeout(() => { wrap.style.display = 'none'; fill.style.width = '0%'; fill.style.background = 'var(--blue)'; }, 3000);
+        return;
+      }
+      label.textContent = 'Checking "' + groups[i] + '"…';
+      fill.style.width = ((i+1)/groups.length*100) + '%';
+      i++;
+      setTimeout(step, 500);
+    };
+    step();
+  }
+
+  let toastTimer;
+  function showToast(msg, color) {
+    const t = document.getElementById('toast');
+    document.getElementById('toast-msg').textContent = msg;
+    t.style.borderColor = color || 'var(--border)';
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2800);
+  }
+</script>
+</body>
+</html>
