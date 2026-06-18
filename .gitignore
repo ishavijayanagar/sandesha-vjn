@@ -12,6 +12,8 @@ build/
 .wwebjs_auth/
 .baileys_auth/
 .wwebjs_cache/
+.lock
+state.json
 
 # Media files
 media/
@@ -47,6 +49,11 @@ schedules.json
 contacts.json
 groups.json
 qr-code.png
+MyGroups.txt
+output.txt
+
+# Dashboard API URL (copy from config.example.js)
+docs/config.js
 
 # Test files
 test_*.js

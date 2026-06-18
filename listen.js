@@ -1,4 +1,8 @@
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
+const auth = require('./auth');
+const { createSettingsWizard } = require('./settings');
+const { createBulkSendWizard } = require('./bulk-send');
+const { createBulkAddMembersWizard } = require('./bulk-add-members');
 const QRCode = require('qrcode');
 const path = require('path');
 const fs = require('fs');
@@ -33,6 +37,7 @@ process.on('SIGINT', () => {
 const SESSION_PATH = path.join(__dirname, '.wwebjs_auth');
 const QR_PATH = path.join(__dirname, 'qr-code.png');
 const GROUPS_FILE = path.join(__dirname, 'groups.json');
+const DOCS_DIR = path.join(__dirname, 'docs');
 const SCHEDULES_FILE = path.join(__dirname, 'schedules.json');
 const NOTIFY_FILE = path.join(__dirname, 'notifications.log');
 const MEDIA_DIR = path.join(__dirname, 'media');
@@ -40,7 +45,7 @@ const LOG_FILE = path.join(__dirname, 'sandesha.log');
 const ZC_WEBHOOK = 'http://127.0.0.1:42617/webhook';
 const LISTEN_PORT = 42620;
 const COMMANDS_GROUP_NAME = 'Me Commands';
-const COMMANDS_GROUP_JID = '120363405541245636@g.us';
+const COMMANDS_GROUP_JID = '120363426133559474@g.us';
 
 if (!fs.existsSync(MEDIA_DIR)) fs.mkdirSync(MEDIA_DIR, { recursive: true });
 
@@ -56,21 +61,74 @@ let lastReplyText = null;
 let recentReplies = new Set();
 let myNumber = null;
 let commandsGroupJid = null;
+let sendServer = null;
+
+const BOT_GREETING = '> Namaskaram 🙏,';
+
+const BOT_REPLY_PREFIXES = [
+  'Group Sets:',
+  'Scheduled! ✅',
+  'Sent to ',
+  'Contacts:',
+  'No groups',
+  'No sets defined',
+  '📱 *Groups',
+  '📋 *All Groups',
+  '━━━━━━━━━━━━━━━━━━━━',
+  'Unknown command:',
+  'Cannot schedule',
+  'Usage:',
+  'Added contact:',
+  'Cancelled:',
+  'Scheduled messages',
+  'Forwarding ',
+  'Sending to ',
+  'Progress: checked',
+  'Inactive groups',
+  'All groups have been active',
+];
+
+function formatBotReply(text) {
+  const body = (text || '').trim();
+  if (body.startsWith(BOT_GREETING)) return body;
+  return body ? `${BOT_GREETING}\n${body}` : BOT_GREETING;
+}
+
+function isBotReplyText(body) {
+  if (!body) return false;
+  const text = body.trim();
+  if (recentReplies.has(text)) return true;
+  for (const reply of recentReplies) {
+    if (text.startsWith(reply) || reply.startsWith(text)) return true;
+  }
+  if (text.startsWith(BOT_GREETING)) return true;
+  const inner = text.replace(new RegExp(`^${BOT_GREETING}\\n?`), '').trim();
+  return BOT_REPLY_PREFIXES.some(prefix => inner.startsWith(prefix) || text.startsWith(prefix));
+}
 
 function trackReply(text) {
   recentReplies.add(text);
-  setTimeout(() => recentReplies.delete(text), 10000);
+  setTimeout(() => recentReplies.delete(text), 30000);
 }
 
 async function botReply(msg, text) {
-  trackReply(text);
-  lastReplyText = text;
-  await msg.reply(text);
+  const full = formatBotReply(text);
+  trackReply(full);
+  lastReplyText = full;
+  await msg.reply(full);
 }
 
 function loadSets() {
   try { return JSON.parse(fs.readFileSync(GROUPS_FILE, 'utf8')); } catch { return {}; }
 }
+
+function saveSets(sets) {
+  fs.writeFileSync(GROUPS_FILE, JSON.stringify(sets, null, 2));
+}
+
+let settingsWizard = null;
+let bulkSendWizard = null;
+let bulkAddMembersWizard = null;
 
 function loadSchedules() {
   try { return JSON.parse(fs.readFileSync(SCHEDULES_FILE, 'utf8')); } catch { return []; }
@@ -101,10 +159,17 @@ function resolveContact(name) {
   return null;
 }
 
+// Use system Chrome/Chromium if set (required when installing with PUPPETEER_SKIP_DOWNLOAD=1).
+const puppeteerExecutable =
+  process.env.PUPPETEER_EXECUTABLE_PATH ||
+  process.env.CHROME_PATH ||
+  undefined;
+
 const client = new Client({
   authStrategy: new LocalAuth({ dataPath: SESSION_PATH }),
   puppeteer: {
     headless: true,
+    ...(puppeteerExecutable ? { executablePath: puppeteerExecutable } : {}),
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
   }
 });
@@ -133,7 +198,18 @@ client.on('ready', async () => {
   startMessagePoller();
   log('Starting scheduler...');
   startScheduler();
+  settingsWizard = createSettingsWizard({ client, loadSets, saveSets, botReply, log });
+  bulkSendWizard = createBulkSendWizard({ resolveAndSend, botReply, log, delay, normalizePhoneDigits });
+  bulkAddMembersWizard = createBulkAddMembersWizard({
+    client,
+    botReply,
+    log,
+    normalizePhoneDigits,
+    resolveGroupByName,
+    resolveParticipantWids,
+  });
   log('Setup complete!');
+  log(`Dashboard: http://127.0.0.1:${LISTEN_PORT}/`);
 });
 
 const STATE_FILE = path.join(__dirname, 'state.json');
@@ -160,6 +236,7 @@ function saveState(state) {
 const initialState = loadState();
 let lastProcessedTimestamp = initialState.lastProcessedTimestamp;
 let pollInterval = null;
+let pollInFlight = false;
 let isInitializing = false;
 let reconnectAttempts = 0;
 const MAX_RECONNECT = 10;
@@ -180,10 +257,15 @@ function startMessagePoller() {
   if (pollInterval) return;
   log('[POLL] Starting message poller, commandsGroupJid=' + commandsGroupJid);
   pollInterval = setInterval(async () => {
+    if (pollInFlight) {
+      log('[POLL] Previous tick still running, skipping');
+      return;
+    }
     if (!commandsGroupJid) {
       log('[POLL] No commandsGroupJid, skipping');
       return;
     }
+    pollInFlight = true;
     log('[POLL] Checking for messages...');
     try {
       const chat = await Promise.race([
@@ -208,49 +290,58 @@ function startMessagePoller() {
           // NEW message - process it
           log(`[POLL] NEW msg: fromMe=${msg.fromMe}, timestamp=${msg.timestamp}, body="${msg.body?.substring(0, 30)}"`);
           
-          // Skip if already replied recently (prevent infinite loop)
-          if (recentReplies.has(msg.body?.trim())) {
-            log(`[POLL] SKIP: in recentReplies`);
+          // Skip bot's own replies (prevent re-processing confirmations as commands)
+          if (isBotReplyText(msg.body)) {
+            log(`[POLL] SKIP: bot reply`);
             lastProcessedTimestamp = msg.timestamp;
             saveTimestamp();
             continue;
           }
           
-          // Process the message
-          lastProcessedTimestamp = msg.timestamp;
-          saveTimestamp();
-          
           const hasMedia = msg.hasMedia;
-          
-          if (hasMedia) {
-            await handleMediaMessage(msg);
-          } else if (msg.body?.startsWith('!')) {
-            await handleCommand(msg.body, msg);
-          } else {
-            // Check for natural scheduling first
-            const scheduleIdx = msg.body.indexOf(' !schedule');
-            if (scheduleIdx > 0) {
-              const messagePart = msg.body.substring(0, scheduleIdx).trim();
-              const schedulePart = msg.body.substring(scheduleIdx + 2).trim();
-              await handleNaturalSchedule(messagePart, schedulePart, msg);
-            } else if (msg.body.toLowerCase().startsWith('forward to ') || msg.body.toLowerCase().startsWith('fwd to ')) {
-              // Handle forward without ! prefix
-              await handleForward(msg);
+
+          try {
+            if (hasMedia) {
+              await handleMediaMessage(msg);
+            } else if (bulkAddMembersWizard && await bulkAddMembersWizard.handleSession(msg)) {
+              // active !addmembers wizard
+            } else if (bulkSendWizard && await bulkSendWizard.handleSession(msg)) {
+              // active !bulk wizard
+            } else if (settingsWizard && await settingsWizard.handleSession(msg)) {
+              // active !settings wizard
+            } else if (msg.body?.startsWith('!')) {
+              await handleCommand(msg.body, msg);
+            } else if (parseQuotedSendTarget(msg.body)) {
+              await handleQuotedSend(msg);
             } else {
-              const parsed = await parseNaturalCommand(msg.body);
-              if (parsed) {
-                await executeSend(parsed, msg);
+              const scheduleIdx = msg.body.indexOf(' !schedule');
+              if (scheduleIdx > 0) {
+                const messagePart = msg.body.substring(0, scheduleIdx).trim();
+                const schedulePart = msg.body.substring(scheduleIdx + 2).trim();
+                await handleNaturalSchedule(messagePart, schedulePart, msg);
               } else {
-                await handleAIChat(msg.body, msg);
+                const parsed = await parseNaturalCommand(msg.body);
+                if (parsed) {
+                  await executeSend(parsed, msg);
+                } else {
+                  await handleAIChat(msg.body, msg);
+                }
               }
             }
+          } catch (err) {
+            log(`[POLL] Handler error: ${err.message}`);
           }
+
+          lastProcessedTimestamp = msg.timestamp;
+          saveTimestamp();
         } else {
           log(`[POLL] OLD msg: timestamp=${msg.timestamp} <= lastProcessedTimestamp=${lastProcessedTimestamp}, skipping`);
         }
       }
     } catch (err) {
       log(`[POLL ERROR] ${err.message}`);
+    } finally {
+      pollInFlight = false;
     }
   }, 5000);
 }
@@ -343,27 +434,7 @@ async function executeMediaSend(parsed, media, filename, msg) {
 }
 
 async function resolveAndSendMedia(target, media, caption) {
-  let jid = target;
-  if (!target.includes('@')) {
-    const chats = await client.getChats();
-    const targetLower = removeEmojis(target).toLowerCase();
-    
-    // Exact match first
-    let group = chats.find(c => c.isGroup && removeEmojis(c.name).toLowerCase() === targetLower);
-    
-    // If no exact match, try partial match
-    if (!group) {
-      group = chats.find(c => c.isGroup && removeEmojis(c.name).toLowerCase().includes(targetLower));
-    }
-    
-    // Try the other way around
-    if (!group) {
-      group = chats.find(c => c.isGroup && targetLower.includes(removeEmojis(c.name).toLowerCase()));
-    }
-    
-    if (group) { jid = group.id._serialized; }
-    else { throw new Error(`Group "${target}" not found`); }
-  }
+  const jid = await resolveTargetJid(target);
   const chat = await client.getChatById(jid);
   if (!chat) throw new Error(`Chat not found`);
   await chat.sendMessage(media, { caption: caption || '' });
@@ -391,21 +462,21 @@ client.on('disconnected', (reason) => {
 });
 
 async function setupCommandsGroup() {
+  commandsGroupJid = COMMANDS_GROUP_JID;
+  log(`Using pre-set Me Commands group: ${commandsGroupJid}`);
+
   try {
-    // Use pre-set Me Commands group
-    commandsGroupJid = COMMANDS_GROUP_JID;
-    console.error(`[${new Date().toISOString()}] Using pre-set Me Commands group: ${commandsGroupJid}`);
-    
-    // Optionally verify the group exists
-    const chat = await client.getChatById(commandsGroupJid);
+    const chat = await Promise.race([
+      client.getChatById(commandsGroupJid),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('verify timeout after 15s')), 15000)),
+    ]);
     if (chat) {
-      console.error(`[${new Date().toISOString()}] Me Commands group verified: ${chat.name}`);
+      log(`Me Commands group verified: ${chat.name}`);
     } else {
-      console.error(`[${new Date().toISOString()}] Warning: Me Commands group not found`);
+      log(`Warning: Me Commands group not found — will retry via poller`);
     }
   } catch (err) {
-    console.error(`[${new Date().toISOString()}] Setup error: ${err.message}`);
-    console.error(`[${new Date().toISOString()}] Skipping group setup, will retry later`);
+    log(`Commands group verify skipped (${err.message}) — bot will still listen on ${commandsGroupJid}`);
   }
 }
 
@@ -434,7 +505,7 @@ function handleIncomingMessage(msg) {
       if (!isFromCommandsGroup) { resolve(); return; }
 
       // Skip bot's own replies (prevent infinite loops)
-      if (recentReplies.has(msg.body.trim())) {
+      if (isBotReplyText(msg.body)) {
         log('SKIP: Bot reply message');
         resolve(); return;
       }
@@ -515,13 +586,41 @@ async function handleCommand(text, msg) {
     return;
   }
 
+  if (raw === 'settings') {
+    if (!settingsWizard) { await botReply(msg, 'Settings not ready yet.'); return; }
+    await settingsWizard.startSettings(msg);
+    return;
+  }
+
+  if (raw === 'bulk' || raw === 'sendnumbers' || raw === 'sendlist') {
+    if (!bulkSendWizard) { await botReply(msg, 'Bulk send not ready yet.'); return; }
+    await bulkSendWizard.startBulk(msg);
+    return;
+  }
+
+  if (raw === 'addmembers' || raw === 'addtogroup') {
+    if (!bulkAddMembersWizard) { await botReply(msg, 'Add members not ready yet.'); return; }
+    await bulkAddMembersWizard.startAddMembers(msg);
+    return;
+  }
+
   if (raw === 'sets') {
     const sets = loadSets();
     const keys = Object.keys(sets);
     if (keys.length === 0) { await botReply(msg, 'No sets defined'); return; }
+
+    const chats = await client.getChats();
+    const jidToName = new Map(
+      chats.filter(c => c.isGroup).map(c => [c.id._serialized, c.name])
+    );
+
     let reply = 'Group Sets:\n';
-    for (const [name, groups] of Object.entries(sets)) { reply += `• ${name}: ${groups.join(', ')}\n`; }
-    await botReply(msg, reply);
+    for (const [name, jids] of Object.entries(sets)) {
+      const labels = (jids || []).map(jid => jidToName.get(jid) || `? (${jid})`);
+      reply += `• ${name} (${labels.length}):\n`;
+      for (const label of labels) reply += `  - ${label}\n`;
+    }
+    await botReply(msg, reply.trim());
     return;
   }
 
@@ -842,12 +941,20 @@ Just type naturally:
 • "send hi to hebbal" → send to hebbal
 • "say hi to all" → broadcast to all
 
+Reply to a message, then:
+• "send to all_vols_grps" → send quoted msg to set
+• "to Maa" → send quoted msg to contact/group
+• "forward to family" → same as above
+
 ━━━━━━━━━━━━━━━━━━━━
 ⚡ Commands
 ━━━━━━━━━━━━━━━━━━━━
 🎨 !ai <text>      - Chat with AI
 📤 !send <t> <msg> - Send to target
+📱 !bulk           - Send one msg to a pasted list of numbers
+👥 !addmembers     - Add pasted numbers to a group (background, admin only)
 📢 !all <msg>      - Broadcast to all
+⚙️ !settings       - Manage sets (add/edit/delete)
 📋 !sets           - List group sets
 📱 !groups         - List all groups
 📋 !grouplist      - List all group names
@@ -874,58 +981,8 @@ Example: Hello !schedule to family at 9am`;
     return;
   }
 
-  // Forward quoted/replied message to another group
-  if (raw.startsWith('forward to ') || raw.startsWith('fwd to ')) {
-    const targetGroup = raw.replace(/^(forward|fwd)\s+to\s+/i, '').trim().toLowerCase();
-    
-    if (!targetGroup) {
-      await botReply(msg, 'Usage: Reply to a message with "forward to <group>"');
-      return;
-    }
-    
-    try {
-      // Get quoted message
-      const quotedMsg = await msg.getQuotedMessage();
-      
-      if (!quotedMsg) {
-        await botReply(msg, '❌ No message quoted/replied to. Reply to a message and type "forward to <group>"');
-        return;
-      }
-      
-      await botReply(msg, `Forwarding quoted message to ${targetGroup}...`);
-      
-      const sets = loadSets();
-      
-      // Check if target is a set
-      const setGroups = sets[targetGroup];
-      if (setGroups && Array.isArray(setGroups)) {
-        for (const groupName of setGroups) {
-          const chat = await client.getChatById(groupName);
-          if (chat && quotedMsg.body) {
-            await chat.sendMessage(quotedMsg.body);
-          }
-        }
-        await botReply(msg, `✅ Forwarded message to ${setGroups.length} groups in ${targetGroup}`);
-        return;
-      }
-      
-      // Find direct group
-      const chats = await client.getChats();
-      const group = chats.find(c => 
-        c.isGroup && c.name.toLowerCase().includes(targetGroup)
-      );
-      
-      if (group && quotedMsg.body) {
-        await group.sendMessage(quotedMsg.body);
-        await botReply(msg, `✅ Forwarded message to ${group.name}`);
-      } else if (!quotedMsg.body) {
-        await botReply(msg, '❌ Can only forward text messages currently');
-      } else {
-        await botReply(msg, `Group "${targetGroup}" not found`);
-      }
-    } catch (err) {
-      await botReply(msg, `Error: ${err.message}`);
-    }
+  if (parseQuotedSendTarget(raw)) {
+    await handleQuotedSend(msg, raw);
     return;
   }
 
@@ -983,74 +1040,332 @@ Example: Hello !schedule to family at 9am`;
   await botReply(msg, `Unknown command: !${raw.split(' ')[0]}\nType !help`);
 }
 
-async function handleForward(msg) {
-  const body = msg.body.trim();
-  
-  if (!body.toLowerCase().startsWith('forward to ') && !body.toLowerCase().startsWith('fwd to ')) {
-    return;
+function parseQuotedSendTarget(body) {
+  if (!body) return null;
+  const text = body.trim();
+  const patterns = [
+    /^(?:send|forward|fwd)\s+to\s+(.+)$/i,
+    /^(?:this|it)\s+to\s+(.+)$/i,
+    /^to\s+(.+)$/i,
+  ];
+  for (const re of patterns) {
+    const m = text.match(re);
+    if (m) return m[1].trim();
   }
-  
-  const targetGroup = body.replace(/^(forward|fwd)\s+to\s+/i, '').trim().toLowerCase();
-  
-  if (!targetGroup) {
-    await botReply(msg, 'Usage: Reply to a message with "forward to <group>"');
-    return;
+  return null;
+}
+
+const GROUP_TYPE_QUALIFIERS = new Set(['announcement', 'announce', 'community', 'discussion', 'group']);
+
+function parseTargetWithQualifier(raw) {
+  const trimmed = (raw || '').trim();
+  const words = trimmed.split(/\s+/);
+  const last = words[words.length - 1]?.toLowerCase();
+  if (GROUP_TYPE_QUALIFIERS.has(last)) {
+    const groupType = last === 'announce' ? 'announcement' : last;
+    const name = words.slice(0, -1).join(' ').trim();
+    return { name: name || trimmed, groupType };
   }
-  
-  try {
-    const quotedMsg = await msg.getQuotedMessage();
-    
-    if (!quotedMsg) {
-      await botReply(msg, '❌ No message quoted/replied to. Reply to a message and type "forward to <group>"');
-      return;
-    }
-    
-    await botReply(msg, `Forwarding quoted message to ${targetGroup}...`);
-    
-    const sets = loadSets();
-    
-    // Check if target is a set (like "family")
-    const setGroups = sets[targetGroup];
-    if (setGroups && Array.isArray(setGroups)) {
-      for (const groupName of setGroups) {
-        try {
-          await sendQuotedContent(groupName, quotedMsg);
-        } catch (e) { /* skip failed group */ }
-      }
-      await botReply(msg, `✅ Forwarded message to ${setGroups.length} groups in ${targetGroup}`);
-      return;
-    }
-    
-    // Try direct group name
+  return { name: trimmed, groupType: null };
+}
+
+function formatGroupTypeHint(chat) {
+  if (isAnnouncementGroup(chat)) return ' (announcement — admins only)';
+  if (getGroupTypeLabel(chat) === 'community') return ' (community — not postable)';
+  if (getGroupTypeLabel(chat) === 'linked') return ' (linked group)';
+  return '';
+}
+
+function findChatsWithSameName(chats, name) {
+  const norm = normalizeNameForMatch(name);
+  return chats.filter((c) => c.isGroup && c.name && normalizeNameForMatch(c.name) === norm);
+}
+
+function findCommunityPairByName(chats, name) {
+  const sameName = findChatsWithSameName(chats, name);
+  const announcement = sameName.find(isAnnouncementGroup);
+  const community = sameName.find((c) => getGroupTypeLabel(c) === 'community');
+  if (announcement && community) return { announcement, community };
+  return null;
+}
+
+function buildCommunityAdminOnlyError(chatName, isAdmin) {
+  return (
+    `❌ "${chatName}" is a WhatsApp Community.\n` +
+    `Only admins can post in the announcement group.\n` +
+    (isAdmin
+      ? 'You appear to be an admin — if send still fails, try from WhatsApp directly.'
+      : 'You are not an admin. Please check with a community admin to post this message.')
+  );
+}
+
+function getSendPermission(chat, allChats = null) {
+  if (!chat?.isGroup) return { ok: true };
+
+  const type = getGroupTypeLabel(chat);
+  const name = chat.name || 'this group';
+  const isAdmin = isUserGroupAdmin(chat);
+
+  if (type === 'community') {
+    const pair = allChats ? findCommunityPairByName(allChats, name) : null;
+    const annAdmin = pair ? isUserGroupAdmin(pair.announcement) : false;
+    return { ok: false, reason: buildCommunityAdminOnlyError(name, annAdmin) };
+  }
+
+  if (isAnnouncementGroup(chat) && !isAdmin) {
+    return {
+      ok: false,
+      reason:
+        `❌ "${name}" is an announcement group (admins only).\n` +
+        'You are not an admin. Please check with a community admin to post this message.',
+    };
+  }
+
+  return { ok: true };
+}
+
+function isQuotedSendOnlyCommand(body) {
+  return !!parseQuotedSendTarget(body);
+}
+
+async function getQuotedMessageSafe(msg) {
+  let current = msg;
+  if (!current?.hasQuotedMsg) {
     try {
-      await sendQuotedContent(targetGroup, quotedMsg);
-      await botReply(msg, `✅ Forwarded message to ${targetGroup}`);
-      return;
-    } catch (e) {
-      // Continue to error
+      const fresh = await client.getMessageById(current.id._serialized);
+      if (fresh?.hasQuotedMsg) current = fresh;
+    } catch (err) {
+      log(`[QUOTE] Could not refresh message: ${err.message}`);
     }
-    
-    await botReply(msg, `Group "${targetGroup}" not found`);
+  }
+  if (!current?.hasQuotedMsg) return null;
+  try {
+    let quoted = await current.getQuotedMessage();
+    if (!quoted) return null;
+    try {
+      const freshQuoted = await client.getMessageById(quoted.id._serialized);
+      if (freshQuoted) quoted = freshQuoted;
+    } catch (err) {
+      log(`[QUOTE] Could not refresh quoted message: ${err.message}`);
+    }
+    return quoted;
+  } catch (err) {
+    log(`[QUOTE] getQuotedMessage failed: ${err.message}`);
+    return null;
+  }
+}
+
+function isCommandLikeText(text) {
+  if (!text) return true;
+  const trimmed = text.trim();
+  if (!trimmed) return true;
+  if (trimmed.startsWith('!')) return true;
+  if (isBotReplyText(trimmed)) return true;
+  if (parseQuotedSendTarget(trimmed)) return true;
+  return false;
+}
+
+async function findCompanionTextForQuoted(quotedMsg) {
+  if (!commandsGroupJid || !quotedMsg?.timestamp) return '';
+
+  try {
+    const chat = await client.getChatById(commandsGroupJid);
+    const messages = await chat.fetchMessages({ limit: 50 });
+    const candidates = messages
+      .filter((m) =>
+        m.timestamp < quotedMsg.timestamp &&
+        !m.hasMedia &&
+        m.body?.trim() &&
+        !isCommandLikeText(m.body)
+      )
+      .sort((a, b) => b.timestamp - a.timestamp);
+
+    if (candidates.length === 0) return '';
+
+    const previousText = candidates[0];
+    const gapSeconds = quotedMsg.timestamp - previousText.timestamp;
+    if (gapSeconds > 300) return '';
+
+    log(`[QUOTE] Companion text found (${gapSeconds}s before media): "${previousText.body.substring(0, 60)}"`);
+    return previousText.body.trim();
+  } catch (err) {
+    log(`[QUOTE] Companion text lookup failed: ${err.message}`);
+    return '';
+  }
+}
+
+async function resolveQuotedTextBundle(quotedMsg) {
+  let inlineText = getQuotedText(quotedMsg);
+
+  if (!inlineText && quotedMsg?.hasQuotedMsg) {
+    try {
+      const parent = await quotedMsg.getQuotedMessage();
+      if (parent) {
+        let parentMsg = parent;
+        try {
+          const freshParent = await client.getMessageById(parent.id._serialized);
+          if (freshParent) parentMsg = freshParent;
+        } catch {}
+        inlineText = getQuotedText(parentMsg);
+        if (inlineText) {
+          log(`[QUOTE] Text from nested quoted message: "${inlineText.substring(0, 60)}"`);
+        }
+      }
+    } catch (err) {
+      log(`[QUOTE] Nested quoted text lookup failed: ${err.message}`);
+    }
+  }
+
+  let companionText = '';
+  if (!inlineText && quotedMsg?.hasMedia) {
+    companionText = await findCompanionTextForQuoted(quotedMsg);
+  }
+
+  const text = inlineText || companionText;
+  return { inlineText, companionText, text };
+}
+
+async function handleQuotedSend(msg, instructionBody) {
+  const targetRaw = parseQuotedSendTarget(instructionBody || msg.body);
+  if (!targetRaw) return;
+
+  log(`[QUOTE] send-to command for "${targetRaw}", hasQuotedMsg=${msg.hasQuotedMsg}`);
+  const quotedMsg = await getQuotedMessageSafe(msg);
+  if (!quotedMsg) {
+    await botReply(msg, '❌ Reply to a message first (swipe right → Reply), then say:\n• send to <set or group>\n• to Maa\n• forward to all_vols_grps');
+    return;
+  }
+  const { inlineText, companionText, text: quotedText } = await resolveQuotedTextBundle(quotedMsg);
+  log(`[QUOTE] payload type=${quotedMsg.type} hasMedia=${quotedMsg.hasMedia} inlineLen=${inlineText.length} companionLen=${companionText.length}`);
+  if (!quotedText && !quotedMsg.hasMedia) {
+    await botReply(msg, '❌ Quoted message has no text or media to send.');
+    return;
+  }
+
+  const { name: targetName, groupType } = parseTargetWithQualifier(targetRaw);
+  const sets = loadSets();
+  const setKey = targetName.toLowerCase();
+  const isSet = sets[setKey] || ['everyone', 'all', 'all groups', 'everybody'].includes(setKey);
+
+  let targetJid = null;
+  let targetLabel = targetName;
+
+  if (!isSet) {
+    const contactNumber = resolveContact(targetName);
+    if (contactNumber) {
+      targetJid = `${contactNumber.replace(/\D/g, '')}@s.whatsapp.net`;
+      targetLabel = targetName;
+    } else {
+      const chats = await client.getChats();
+      const matches = await findChatMatchesByName(chats, targetName, { groupType });
+      if (matches.length === 0) {
+        const pair = findCommunityPairByName(chats, targetName);
+        if (pair && !isUserGroupAdmin(pair.announcement)) {
+          await botReply(msg, buildCommunityAdminOnlyError(targetName, false));
+          return;
+        }
+        const hint = groupType ? ` (type: ${groupType})` : '';
+        await botReply(msg, `Target "${targetName}"${hint} not found. Use !sets or !groups.`);
+        return;
+      }
+      if (matches.length > 1) {
+        let text = `Multiple matches for "${targetName}". Be more specific:\n`;
+        matches.slice(0, 8).forEach((c, i) => {
+          text += `${i + 1}. ${c.name}${formatGroupTypeHint(c)}\n   ${c.id._serialized}\n`;
+        });
+        text += '\nTip: announcement groups need admin rights. Community shells are not postable.';
+        await botReply(msg, text.trim());
+        return;
+      }
+      const picked = matches[0];
+      const permission = getSendPermission(picked, chats);
+      if (!permission.ok) {
+        await botReply(msg, permission.reason);
+        return;
+      }
+      targetJid = picked.id._serialized;
+      targetLabel = picked.name;
+    }
+  }
+
+  try {
+    if (setKey === 'all' || ['everyone', 'all groups', 'everybody'].includes(setKey)) {
+      const setGroups = sets.all || [];
+      if (setGroups.length === 0) { await botReply(msg, 'No groups in "all" set'); return; }
+      await botReply(msg, `Sending quoted message to ${setGroups.length} groups...`);
+      for (let i = 0; i < setGroups.length; i++) {
+        await sendQuotedContent(setGroups[i], quotedMsg, { inlineText, companionText });
+        if (i < setGroups.length - 1) await delay(2000);
+      }
+      await botReply(msg, `✅ Sent to ${setGroups.length} groups`);
+      return;
+    }
+
+    const setGroups = sets[setKey];
+    if (setGroups) {
+      await botReply(msg, `Sending quoted message to ${setGroups.length} groups in "${setKey}"...`);
+      for (let i = 0; i < setGroups.length; i++) {
+        await sendQuotedContent(setGroups[i], quotedMsg, { inlineText, companionText });
+        if (i < setGroups.length - 1) await delay(2000);
+      }
+      await botReply(msg, `✅ Sent to ${setGroups.length} groups in "${setKey}"`);
+      return;
+    }
+
+    log(`[QUOTE] resolved "${targetRaw}" → "${targetLabel}" (${targetJid})`);
+    await sendQuotedContent(targetJid, quotedMsg, { inlineText, companionText, text: quotedText });
+    await botReply(msg, `✅ Sent to ${targetLabel}`);
   } catch (err) {
     await botReply(msg, `Error: ${err.message}`);
   }
 }
 
-async function sendQuotedContent(target, quotedMsg) {
-  // Check if quoted message has media
-  if (quotedMsg.hasMedia && quotedMsg.type !== 'chat') {
+function getQuotedText(quotedMsg) {
+  const data = quotedMsg?._data || {};
+  const raw =
+    quotedMsg?.body ||
+    data.caption ||
+    data.body ||
+    quotedMsg?.caption ||
+    '';
+  return String(raw).trim();
+}
+
+async function sendQuotedContent(target, quotedMsg, textBundle = null) {
+  const bundle = textBundle || await resolveQuotedTextBundle(quotedMsg);
+  const inlineText = bundle.inlineText || '';
+  const companionText = bundle.companionText || '';
+  const text = (bundle.text || inlineText || companionText || '').trim();
+  const caption = inlineText || companionText || text;
+  const jid = target.includes('@') ? target : await resolveTargetJid(target);
+
+  if (quotedMsg.hasMedia) {
     const media = await quotedMsg.downloadMedia();
     if (media) {
-      const caption = quotedMsg.caption || quotedMsg.body || '';
-      await resolveAndSendMedia(target, media, caption);
+      const msgMedia = new MessageMedia(media.mimetype, media.data, media.filename || 'file');
+
+      // Very long text: WhatsApp caption limit ~1024 — send text first, then media
+      if (caption && caption.length > 900) {
+        await sendMessageToJid(jid, caption);
+        await delay(800);
+        await sendMessageToJid(jid, msgMedia);
+        log(`[QUOTE-SEND] Sent long text + media to ${jid}`);
+        return;
+      }
+
+      await sendMessageToJid(jid, msgMedia, { caption: caption || '' });
+      log(`[QUOTE-SEND] Sent media with caption (${caption.length} chars) to ${jid}`);
       return;
     }
   }
-  
-  // No media, just send text
-  if (quotedMsg.body) {
-    await resolveAndSend(target, quotedMsg.body);
+
+  if (text) {
+    await sendMessageToJid(jid, text);
+    log(`[QUOTE-SEND] Sent text (${text.length} chars) to ${jid}`);
+    return;
   }
+
+  throw new Error('Nothing to send — quoted message has no text or media');
 }
 
 async function parseNaturalCommand(input) {
@@ -1071,10 +1386,13 @@ async function parseNaturalCommand(input) {
       const result = await resolveTarget(targetRaw, sets);
       if (result) {
         message = cleanMessage(message, sendVerbs);
+        if (!message.trim()) return null; // "send to X" — use reply-to-message flow
         return { target: result, message: message.trim(), isAll: allKeywords.includes(result.toLowerCase()) };
       }
     }
   }
+
+  if (isQuotedSendOnlyCommand(input)) return null;
 
   for (let i = words.length - 1; i >= 1; i--) {
     const possibleTarget = words.slice(i).join(' ');
@@ -1105,13 +1423,12 @@ async function resolveTarget(name, sets) {
   if (['everyone', 'all', 'all groups', 'everybody'].includes(lower)) return 'all';
   if (sets[lower]) return lower;
   
-  // Check contacts
   const contactNumber = resolveContact(lower);
   if (contactNumber) return contactNumber;
   
   try {
     const chats = await client.getChats();
-    const found = chats.find(c => c.isGroup && c.name.toLowerCase() === lower);
+    const found = await findChatByTargetName(chats, name);
     if (found) return found.name;
   } catch (e) { /* ignore */ }
   return null;
@@ -1119,6 +1436,11 @@ async function resolveTarget(name, sets) {
 
 async function executeSend(parsed, msg) {
   try {
+    if (!parsed.message?.trim()) {
+      await botReply(msg, '❌ Message is empty. Type your message first, reply to it, then say "send to <target>".');
+      return;
+    }
+
     const sets = loadSets();
     
     if (parsed.isAll) {
@@ -1148,22 +1470,25 @@ async function executeSend(parsed, msg) {
       return;
     }
 
-    const chats = await client.getChats();
-    const group = chats.find(c => c.isGroup && c.name.toLowerCase() === parsed.target.toLowerCase());
-    if (group) {
-      await resolveAndSend(group.id._serialized, parsed.message);
-      await botReply(msg, `Sent to ${group.name}`);
-      return;
-    }
-
-    if (/^\+?\d{10,15}$/.test(parsed.target)) {
-      const jid = `${parsed.target.replace(/\D/g, '')}@s.whatsapp.net`;
+    try {
+      const chats = await client.getChats();
+      const matches = await findChatMatchesByName(chats, parsed.target);
+      if (matches.length > 1) {
+        let text = `Multiple matches for "${parsed.target}". Be more specific:\n`;
+        matches.slice(0, 8).forEach((c, i) => { text += `${i + 1}. ${c.name}\n`; });
+        await botReply(msg, text.trim());
+        return;
+      }
+      const jid = await resolveTargetJid(parsed.target);
+      const chat = await client.getChatById(jid);
+      log(`[SEND] resolved "${parsed.target}" → "${chat?.name || parsed.target}" (${jid})`);
       await resolveAndSend(jid, parsed.message);
-      await botReply(msg, `Sent to ${parsed.target}`);
+      await botReply(msg, `Sent to ${chat?.name || parsed.target}`);
+      return;
+    } catch (e) {
+      await botReply(msg, `Target "${parsed.target}" not found. Use !groups, !contacts, or !sets.`);
       return;
     }
-
-    await botReply(msg, `Target "${parsed.target}" not found. Use !groups to see available groups, or !sets for sets.`);
   } catch (err) {
     console.error(`Execute send error: ${err.message}`);
     await botReply(msg, `Error: ${err.message}`);
@@ -1200,46 +1525,420 @@ function removeEmojis(str) {
   return str.replace(/[\u{1F300}-\u{1F9FF}]/gu, '').trim();
 }
 
-async function resolveAndSend(target, message) {
-  let jid = target;
-  console.error(`[SEND] Target: ${target}, Message: "${message.substring(0, 50)}"`);
-  
-  if (!target.includes('@')) {
-    // Check if it's a phone number
-    if (/^\+?\d{10,15}$/.test(target)) {
-      jid = `${target.replace(/\D/g, '')}@s.whatsapp.net`;
-      console.error(`[SEND] Resolved to phone JID: ${jid}`);
-    } else {
-      // It's a group name
-      const chats = await client.getChats();
-      const targetLower = removeEmojis(target).toLowerCase();
-    
-    // Exact match first
-    let group = chats.find(c => c.isGroup && removeEmojis(c.name).toLowerCase() === targetLower);
-    
-    // If no exact match, try partial match
-    if (!group) {
-      group = chats.find(c => c.isGroup && removeEmojis(c.name).toLowerCase().includes(targetLower));
+function normalizeNameForMatch(str) {
+  return removeEmojis(str)
+    .toLowerCase()
+    .replace(/[-–—]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const GENERIC_TARGET_WORDS = new Set([
+  'group', 'groups', 'sets', 'set', 'all', 'the', 'msg', 'message', 'send', 'say', 'tell',
+]);
+
+function scoreChatNameMatch(targetNorm, chatNameNorm) {
+  if (!targetNorm || !chatNameNorm) return 0;
+  if (chatNameNorm === targetNorm) return 10000 + chatNameNorm.length;
+  if (chatNameNorm.includes(targetNorm)) return 5000 + chatNameNorm.length;
+  if (targetNorm.includes(chatNameNorm) && chatNameNorm.length >= 3) return 1000 + chatNameNorm.length;
+  return 0;
+}
+
+function isAnnouncementGroup(chat) {
+  return !!(chat?.groupMetadata?.announce || chat?._data?.groupMetadata?.announce);
+}
+
+function getGroupParticipantCount(chat) {
+  return chat.participants?.length || chat.groupMetadata?.participants?.length || 0;
+}
+
+function getGroupTypeLabel(chat) {
+  if (!chat?.isGroup) return 'chat';
+  if (isAnnouncementGroup(chat)) return 'announcement';
+  const parentId = chat.groupMetadata?.parentGroupId?._serialized || chat.groupMetadata?.parentGroupId;
+  if (parentId) return 'linked';
+  if (getGroupParticipantCount(chat) <= 15) return 'community';
+  return 'group';
+}
+
+function isUserGroupAdmin(chat) {
+  if (!myNumber || !chat?.isGroup) return false;
+  const parts = chat.groupMetadata?.participants || chat.participants || [];
+  const meNorm = myNumber.replace(/@.*/, '');
+  return parts.some((p) => {
+    const id = p.id?._serialized || String(p.id || '');
+    const idNorm = id.replace(/@.*/, '');
+    return (id === myNumber || idNorm === meNorm) && (p.isAdmin || p.isSuperAdmin);
+  });
+}
+
+async function canPostToGroup(chat, allChats = null) {
+  return getSendPermission(chat, allChats).ok;
+}
+
+function matchesGroupTypeFilter(chat, groupType) {
+  if (!groupType) return true;
+  const label = getGroupTypeLabel(chat);
+  if (groupType === 'announcement') return label === 'announcement';
+  if (groupType === 'community') return label === 'community' || (!isAnnouncementGroup(chat) && label !== 'linked');
+  if (groupType === 'discussion' || groupType === 'group') return !isAnnouncementGroup(chat);
+  return true;
+}
+
+async function pickAmongSameNameChats(candidates) {
+  if (!candidates?.length) return null;
+  if (candidates.length === 1) return candidates[0];
+
+  const details = await Promise.all(candidates.map(async (chat) => {
+    let lastTs = 0;
+    try {
+      const msgs = await Promise.race([
+        chat.fetchMessages({ limit: 1 }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
+      ]);
+      if (msgs[0]) lastTs = msgs[0].timestamp;
+    } catch { /* ignore */ }
+    const announce = isAnnouncementGroup(chat);
+    const isAdmin = isUserGroupAdmin(chat);
+    return {
+      chat,
+      lastTs,
+      jid: chat.id?._serialized,
+      announce,
+      isAdmin,
+      canPost: !announce || isAdmin,
+      type: getGroupTypeLabel(chat),
+      participants: getGroupParticipantCount(chat),
+    };
+  }));
+
+  const hasAnnounce = details.some((d) => d.announce);
+  const hasCommunity = details.some((d) => d.type === 'community');
+  const annDetail = details.find((d) => d.announce);
+
+  // Community + announcement pair: community shell is never postable; need announcement admin
+  if (hasAnnounce && hasCommunity && !annDetail?.isAdmin) {
+    log(`[MATCH] ${candidates.length} named "${candidates[0].chat.name}" — community pair, user not admin`);
+    return null;
+  }
+
+  const pickPool = details.filter((d) => d.type !== 'community');
+
+  pickPool.sort((a, b) => {
+    const aGroup = a.chat.isGroup && a.jid?.endsWith('@g.us') ? 1 : 0;
+    const bGroup = b.chat.isGroup && b.jid?.endsWith('@g.us') ? 1 : 0;
+    if (bGroup !== aGroup) return bGroup - aGroup;
+    if (a.canPost !== b.canPost) return b.canPost - a.canPost;
+    if (a.announce !== b.announce) return a.announce - b.announce;
+    if (b.lastTs !== a.lastTs) return b.lastTs - a.lastTs;
+    if (b.participants !== a.participants) return b.participants - a.participants;
+    return (b.chat.pinned || 0) - (a.chat.pinned || 0);
+  });
+
+  const picked = pickPool[0];
+  if (!picked) return null;
+  const others = details.map((d) =>
+    `${d.jid}${d.announce ? '(ann)' : `(${d.type})`} postable=${d.canPost} activity=${d.lastTs || 'none'}`
+  ).join(' | ');
+  log(`[MATCH] ${candidates.length} named "${picked.chat.name}" → picked ${picked.jid} (${picked.type}${picked.announce ? ', announcement' : ''}) | ${others}`);
+  return picked.chat;
+}
+
+async function collapseDuplicateNameMatches(matches, options = {}) {
+  if (matches.length <= 1) return matches;
+
+  const byName = new Map();
+  for (const chat of matches) {
+    const key = normalizeNameForMatch(chat.name);
+    if (!byName.has(key)) byName.set(key, []);
+    byName.get(key).push(chat);
+  }
+
+  const collapsed = [];
+  for (const group of byName.values()) {
+    if (group.length > 1) {
+      const hasAnnounce = group.some(isAnnouncementGroup);
+      const hasNonAnnounce = group.some((c) => !isAnnouncementGroup(c));
+      if (options.groupType && hasAnnounce && hasNonAnnounce) {
+        for (const chat of group) {
+          if (matchesGroupTypeFilter(chat, options.groupType)) collapsed.push(chat);
+        }
+        continue;
+      }
     }
-    
-    // If still no match, try the other way around (target includes group name)
-    if (!group) {
-      group = chats.find(c => c.isGroup && targetLower.includes(removeEmojis(c.name).toLowerCase()));
+    const picked = await pickAmongSameNameChats(group);
+    if (picked) collapsed.push(picked);
+  }
+  return collapsed.filter(Boolean);
+}
+
+async function findChatMatchesByName(chats, target, options = {}) {
+  const targetNorm = normalizeNameForMatch(target);
+  if (!targetNorm || targetNorm.length < 3 || GENERIC_TARGET_WORDS.has(targetNorm)) return [];
+
+  const scored = chats
+    .filter((c) => c.name)
+    .map((c) => ({
+      chat: c,
+      score: scoreChatNameMatch(targetNorm, normalizeNameForMatch(c.name)),
+    }))
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score || b.chat.name.length - a.chat.name.length);
+
+  if (scored.length === 0) return [];
+  const topScore = scored[0].score;
+  let topMatches = scored.filter((x) => x.score === topScore).map((x) => x.chat);
+  topMatches = await collapseDuplicateNameMatches(topMatches, options);
+  if (options.groupType) {
+    topMatches = topMatches.filter((c) => matchesGroupTypeFilter(c, options.groupType));
+  }
+  return topMatches;
+}
+
+async function findChatByTargetName(chats, target, options = {}) {
+  const { name, groupType } = parseTargetWithQualifier(target);
+  const matches = await findChatMatchesByName(chats, name, { ...options, groupType: options.groupType || groupType });
+  return matches[0] || null;
+}
+
+function inferDefaultCountryCode() {
+  if (process.env.DEFAULT_COUNTRY_CODE) return process.env.DEFAULT_COUNTRY_CODE.replace(/\D/g, '');
+  if (!myNumber) return '91';
+  const digits = myNumber.replace(/\D/g, '');
+  if (digits.length > 10) return digits.slice(0, digits.length - 10);
+  return '91';
+}
+
+function normalizePhoneDigits(digits) {
+  let d = String(digits).replace(/\D/g, '');
+  if (d.length === 10 && /^[6-9]\d{9}$/.test(d)) {
+    d = inferDefaultCountryCode() + d;
+  }
+  return d;
+}
+
+function extractPhoneDigitsFromJid(jid) {
+  if (!jid || jid.includes('@g.us')) return null;
+  const m = jid.match(/^(\d{10,15})@(c\.us|s\.whatsapp\.net|lid)$/);
+  return m ? m[1] : null;
+}
+
+async function resolvePhoneSendCandidates(phoneInput) {
+  const normalized = normalizePhoneDigits(phoneInput);
+  const candidates = new Set();
+
+  let wid = null;
+  try {
+    wid = await client.getNumberId(normalized);
+  } catch (err) {
+    log(`[SEND] getNumberId failed for ${normalized}: ${err.message}`);
+  }
+
+  if (!wid) {
+    throw new Error(`${normalized} is not on WhatsApp (check country code, e.g. 91XXXXXXXXXX)`);
+  }
+
+  const widStr = wid._serialized || String(wid);
+  candidates.add(widStr);
+  candidates.add(`${normalized}@c.us`);
+  candidates.add(`${normalized}@s.whatsapp.net`);
+
+  try {
+    const [mapping] = await client.getContactLidAndPhone([widStr, `${normalized}@c.us`]);
+    if (mapping?.lid) candidates.add(mapping.lid);
+    if (mapping?.pn) candidates.add(mapping.pn);
+  } catch (err) {
+    log(`[SEND] LID lookup for ${normalized}: ${err.message}`);
+  }
+
+  try {
+    await Promise.race([
+      client.getChatById(widStr),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('getChat timeout')), 10000)),
+    ]);
+    const [mapping] = await client.getContactLidAndPhone([widStr]);
+    if (mapping?.lid) candidates.add(mapping.lid);
+  } catch (err) {
+    log(`[SEND] Chat warm-up for ${normalized}: ${err.message}`);
+  }
+
+  return [...candidates].filter(Boolean);
+}
+
+function isLidJid(jid) {
+  return typeof jid === 'string' && jid.endsWith('@lid');
+}
+
+function isGroupJid(jid) {
+  return typeof jid === 'string' && (jid.endsWith('@g.us') || jid.includes('newsletter'));
+}
+
+async function resolveSendableJids(jid) {
+  if (!jid) return [];
+  if (isGroupJid(jid)) return [jid];
+
+  const phoneDigits = extractPhoneDigitsFromJid(jid);
+  if (phoneDigits) {
+    return resolvePhoneSendCandidates(phoneDigits);
+  }
+
+  const candidates = new Set([jid]);
+
+  if (jid.endsWith('@s.whatsapp.net')) {
+    const num = normalizePhoneDigits(jid.replace('@s.whatsapp.net', ''));
+    candidates.add(`${num}@c.us`);
+  }
+
+  try {
+    const [mapping] = await client.getContactLidAndPhone([jid]);
+    if (mapping?.lid) candidates.add(mapping.lid);
+    if (mapping?.pn) {
+      candidates.add(mapping.pn);
+      if (mapping.pn.endsWith('@c.us')) {
+        const num = mapping.pn.replace('@c.us', '');
+        candidates.add(`${num}@s.whatsapp.net`);
+      }
     }
-    
-    if (group) { 
-      jid = group.id._serialized;
-      console.error(`[SEND] Resolved to group: ${group.name} (${jid})`);
-    }
-    else { throw new Error(`Group "${target}" not found`); }
+  } catch (err) {
+    log(`[SEND] LID/phone lookup failed for ${jid}: ${err.message}`);
+  }
+
+  if (isLidJid(jid)) {
+    try {
+      const chat = await client.getChatById(jid);
+      if (chat) {
+        const contact = await chat.getContact();
+        if (contact?.number) {
+          const num = contact.number.replace(/\D/g, '');
+          candidates.add(`${num}@c.us`);
+          candidates.add(`${num}@s.whatsapp.net`);
+        }
+        const contactId = contact?.id?._serialized;
+        if (contactId && !contactId.endsWith('@lid')) candidates.add(contactId);
+      }
+    } catch (err) {
+      log(`[SEND] Contact lookup failed for ${jid}: ${err.message}`);
     }
   }
-  
-  const chat = await client.getChatById(jid);
-  if (!chat) throw new Error(`Chat not found`);
-  console.error(`[SEND] Sending to chat: ${chat.name || jid}`);
-  await chat.sendMessage(message);
-  console.error(`[SEND] ✅ Sent to ${chat.name || jid}: "${message.substring(0, 50)}"`);
+
+  return [...candidates].filter(Boolean);
+}
+
+async function sendMessageToJid(jid, content, options = {}) {
+  const jids = await resolveSendableJids(jid);
+  // Groups (especially announcement) can take 60s+ to ack — don't block on delivery.
+  const waitUntilMsgSent = options.waitUntilMsgSent ?? !isGroupJid(jids[0]);
+  let lastErr;
+  for (const attemptJid of jids) {
+    try {
+      const result = await client.sendMessage(attemptJid, content, {
+        ...options,
+        waitUntilMsgSent,
+      });
+      log(`[SEND] ✅ via ${attemptJid}${waitUntilMsgSent ? '' : ' (queued)'}`);
+      return result;
+    } catch (err) {
+      lastErr = err;
+      log(`[SEND] failed via ${attemptJid}: ${err.message}`);
+    }
+  }
+  throw lastErr || new Error(`Failed to send to ${jid}`);
+}
+
+async function resolveTargetJid(target) {
+  if (!target) throw new Error('No target specified');
+  if (target.includes('@')) return target;
+
+  const { name, groupType } = parseTargetWithQualifier(target);
+
+  if (/^\+?\d{10,15}$/.test(name)) {
+    return `${normalizePhoneDigits(name.replace(/\D/g, ''))}@c.us`;
+  }
+
+  const contact = resolveContact(name);
+  if (contact) {
+    return `${normalizePhoneDigits(contact.replace(/\D/g, ''))}@c.us`;
+  }
+
+  const chats = await client.getChats();
+  const matches = await findChatMatchesByName(chats, name, { groupType });
+  if (matches.length === 0) {
+    const pair = findCommunityPairByName(chats, name);
+    if (pair && !isUserGroupAdmin(pair.announcement)) {
+      throw new Error(buildCommunityAdminOnlyError(name, false));
+    }
+    throw new Error(`Target "${name}" not found`);
+  }
+  if (matches.length > 1) {
+    throw new Error(`Multiple matches for "${name}" — be more specific`);
+  }
+  const picked = matches[0];
+  const permission = getSendPermission(picked, chats);
+  if (!permission.ok) throw new Error(permission.reason);
+  return picked.id._serialized;
+}
+
+async function resolveGroupByName(name) {
+  const chats = await client.getChats();
+  const matches = await findChatMatchesByName(chats, name);
+  if (matches.length === 0) {
+    return { error: `Group "${name}" not found. Use !groups to list.` };
+  }
+  if (matches.length > 1) {
+    let text = `Multiple groups match "${name}". Be more specific:\n`;
+    matches.slice(0, 6).forEach((c, i) => {
+      text += `${i + 1}. ${c.name}${formatGroupTypeHint(c)}\n`;
+    });
+    return { error: text.trim() };
+  }
+  const chat = matches[0];
+  if (getGroupTypeLabel(chat) === 'community') {
+    return {
+      error: `"${chat.name}" is a WhatsApp Community shell, not a member group. Pick a regular group you admin.`,
+    };
+  }
+  if (!isUserGroupAdmin(chat)) {
+    return { error: `You are not an admin of "${chat.name}". Only admins can add members.` };
+  }
+  return { chat };
+}
+
+async function resolveParticipantWids(numbers) {
+  const wids = [];
+  const failed = [];
+  const entries = [];
+  for (const raw of numbers) {
+    const digits = normalizePhoneDigits(String(raw).replace(/\D/g, ''));
+    try {
+      const wid = await client.getNumberId(digits);
+      if (!wid) {
+        failed.push({ num: digits, error: 'Not on WhatsApp' });
+        continue;
+      }
+      const widStr = wid._serialized || `${digits}@c.us`;
+      wids.push(widStr);
+      entries.push({ digits, wid: widStr });
+    } catch (err) {
+      failed.push({ num: digits, error: err.message.split('\n')[0] });
+    }
+  }
+  return { wids, failed, entries };
+}
+
+async function validateScheduleTarget(target) {
+  const lower = target.toLowerCase();
+  const sets = loadSets();
+  if (sets[lower]) return;
+  if (resolveContact(target)) return;
+  await resolveTargetJid(target);
+}
+
+async function resolveAndSend(target, message) {
+  if (!message?.trim()) throw new Error('Cannot send an empty message');
+  const jid = await resolveTargetJid(target);
+  log(`[SEND] → ${jid}: "${message.substring(0, 80)}"`);
+  await sendMessageToJid(jid, message);
 }
 
 function delay(ms) {
@@ -1274,11 +1973,134 @@ function forwardToZeroClaw(message) {
   });
 }
 
+const WEB_MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.json': 'application/json',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
+};
+
+function setCorsHeaders(res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+}
+
+function jsonResponse(res, status, body) {
+  res.writeHead(status, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(body));
+}
+
+function requireAuth(req, res) {
+  if (auth.validateAuth(req)) return true;
+  jsonResponse(res, 401, { error: 'Unauthorized' });
+  return false;
+}
+
+function readRequestBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => resolve(body));
+    req.on('error', reject);
+  });
+}
+
+function serveStaticFile(req, res, parsed) {
+  let reqPath = parsed.pathname === '/' ? '/index.html' : parsed.pathname;
+  if (reqPath.startsWith('/dashboard')) {
+    reqPath = reqPath === '/dashboard' || reqPath === '/dashboard/'
+      ? '/index.html'
+      : reqPath.replace(/^\/dashboard/, '') || '/index.html';
+  }
+  const safe = path.normalize(reqPath).replace(/^(\.\.[/\\])+/, '');
+  const filePath = path.join(DOCS_DIR, safe);
+  if (!filePath.startsWith(DOCS_DIR) || !fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+    res.writeHead(404); res.end('Not found');
+    return true;
+  }
+  const ext = path.extname(filePath);
+  res.writeHead(200, { 'Content-Type': WEB_MIME[ext] || 'application/octet-stream' });
+  fs.createReadStream(filePath).pipe(res);
+  return true;
+}
+
 function startSendServer() {
-  const server = http.createServer(async (req, res) => {
+  if (sendServer) return;
+
+  auth.checkStartupAuth(log);
+
+  sendServer = http.createServer(async (req, res) => {
     const parsed = url.parse(req.url, true);
+    setCorsHeaders(res);
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204); res.end();
+      return;
+    }
+
+    if (req.method === 'GET' && (parsed.pathname === '/' || parsed.pathname.startsWith('/dashboard') || parsed.pathname.endsWith('.css') || parsed.pathname.endsWith('.js'))) {
+      if (serveStaticFile(req, res, parsed)) return;
+    }
+
+    if (req.method === 'POST' && parsed.pathname === '/auth/login') {
+      try {
+        const body = await readRequestBody(req);
+        const { password } = JSON.parse(body || '{}');
+        const result = auth.login(password || '');
+        if (!result.ok) {
+          jsonResponse(res, 401, { error: result.error });
+          return;
+        }
+        jsonResponse(res, 200, { token: result.token, expiresAt: result.expiresAt });
+      } catch (err) {
+        jsonResponse(res, 500, { error: err.message });
+      }
+      return;
+    }
+
+    if (req.method === 'POST' && parsed.pathname === '/auth/logout') {
+      auth.logout(auth.getBearerToken(req));
+      jsonResponse(res, 200, { ok: true });
+      return;
+    }
+
+    if (req.method === 'GET' && parsed.pathname === '/sets') {
+      if (!requireAuth(req, res)) return;
+      try {
+        res.writeHead(200); res.end(JSON.stringify({ sets: loadSets() }));
+      } catch (err) { res.writeHead(500); res.end(JSON.stringify({ error: err.message })); }
+      return;
+    }
+
+    if (req.method === 'POST' && parsed.pathname === '/sets') {
+      if (!requireAuth(req, res)) return;
+      let body = '';
+      req.on('data', c => body += c);
+      req.on('end', () => {
+        try {
+          const data = JSON.parse(body || '{}');
+          if (!data.sets || typeof data.sets !== 'object') {
+            res.writeHead(400); res.end(JSON.stringify({ error: 'Body must include { sets: {...} }' }));
+            return;
+          }
+          for (const [name, jids] of Object.entries(data.sets)) {
+            if (!Array.isArray(jids)) {
+              res.writeHead(400); res.end(JSON.stringify({ error: `Set "${name}" must be an array of JIDs` }));
+              return;
+            }
+          }
+          saveSets(data.sets);
+          res.writeHead(200); res.end(JSON.stringify({ ok: true, sets: loadSets() }));
+        } catch (err) { res.writeHead(500); res.end(JSON.stringify({ error: err.message })); }
+      });
+      return;
+    }
 
     if (req.method === 'POST' && parsed.pathname === '/send') {
+      if (!requireAuth(req, res)) return;
       let body = '';
       req.on('data', c => body += c);
       req.on('end', async () => {
@@ -1294,6 +2116,7 @@ function startSendServer() {
     }
 
     if (req.method === 'POST' && parsed.pathname === '/send-media') {
+      if (!requireAuth(req, res)) return;
       let body = '';
       req.on('data', c => body += c);
       req.on('end', async () => {
@@ -1317,10 +2140,15 @@ function startSendServer() {
     }
 
     if (req.method === 'GET' && parsed.pathname === '/groups') {
+      if (!requireAuth(req, res)) return;
       try {
         const chats = await client.getChats();
         const groups = chats.filter(c => c.isGroup).map(g => ({
-          name: g.name, jid: g.id._serialized, participants: g.participants?.length || 0
+          name: g.name,
+          jid: g.id._serialized,
+          participants: getGroupParticipantCount(g),
+          announcement: isAnnouncementGroup(g),
+          type: getGroupTypeLabel(g),
         }));
         res.writeHead(200); res.end(JSON.stringify(groups));
       } catch (err) { res.writeHead(500); res.end(JSON.stringify({ error: err.message })); }
@@ -1328,16 +2156,22 @@ function startSendServer() {
     }
 
     if (req.method === 'GET' && parsed.pathname === '/health') {
-      res.writeHead(200); res.end(JSON.stringify({ 
-        status: 'ok', 
-        info: client.info,
-        commandsGroup: commandsGroupJid,
-        commandsGroupName: COMMANDS_GROUP_NAME
-      }));
+      const authed = auth.validateAuth(req);
+      const payload = {
+        status: 'ok',
+        authRequired: auth.isAuthRequired(),
+        commandsGroupName: COMMANDS_GROUP_NAME,
+      };
+      if (authed) {
+        payload.info = client.info;
+        payload.commandsGroup = commandsGroupJid;
+      }
+      jsonResponse(res, 200, payload);
       return;
     }
 
     if (req.method === 'GET' && parsed.pathname === '/chats') {
+      if (!requireAuth(req, res)) return;
       try {
         const limit = parseInt(parsed.query.limit) || 20;
         const chats = await client.getChats();
@@ -1354,8 +2188,18 @@ function startSendServer() {
     res.writeHead(404); res.end('Not found');
   });
 
-  server.listen(LISTEN_PORT, '127.0.0.1', () => {
+  sendServer.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      log(`Port ${LISTEN_PORT} already in use. Run: ./start.sh  (or kill the process on port ${LISTEN_PORT})`);
+    } else {
+      log(`HTTP server error: ${err.message}`);
+    }
+    process.exit(1);
+  });
+
+  sendServer.listen(LISTEN_PORT, '127.0.0.1', () => {
     console.error(`[${new Date().toISOString()}] Send server on http://127.0.0.1:${LISTEN_PORT}`);
+    console.error(`[${new Date().toISOString()}] Dashboard:  http://127.0.0.1:${LISTEN_PORT}/`);
     console.error(`[${new Date().toISOString()}] =========================================`);
     console.error(`[${new Date().toISOString()}] IMPORTANT: Join the "Me Commands" group on WhatsApp to send bot commands!`);
     console.error(`[${new Date().toISOString()}] =========================================`);
@@ -1390,6 +2234,14 @@ Example: Hello everyone !schedule to family at 9am tomorrow`);
   if (!runAt) {
     await botReply(msg, `Could not understand time: "${timeStr}"
 Try: 9am, 9:30am, 9am tomorrow, 9am monday`);
+    return;
+  }
+
+  try {
+    await validateScheduleTarget(target);
+  } catch (e) {
+    await botReply(msg, `Cannot schedule to "${target}": ${e.message}
+Add to contacts.json, groups.json, or use an exact WhatsApp chat name.`);
     return;
   }
   
@@ -1450,6 +2302,14 @@ Example: !schedule hello to family at 9am tomorrow`);
   if (!runAt) {
     await botReply(msg, `Could not understand time: "${timeStr}"
 Try: 9am, 9:30am, 9am tomorrow, 9am monday, 14:30`);
+    return;
+  }
+
+  try {
+    await validateScheduleTarget(target);
+  } catch (e) {
+    await botReply(msg, `Cannot schedule to "${target}": ${e.message}
+Add to contacts.json, groups.json, or use an exact WhatsApp chat name.`);
     return;
   }
   
@@ -1632,28 +2492,22 @@ async function runSchedulerCheck() {
         const runAt = new Date(schedule.runAt);
         if (runAt <= now) {
           console.log(`[SCHEDULE] Sending: "${schedule.message}" to ${schedule.target}`);
-          sentScheduleIds.add(schedule.id); // Mark as sent
           try {
             const sets = loadSets();
-            
-            // Try to resolve target
             const setGroups = sets[schedule.target.toLowerCase()];
             if (setGroups) {
               console.log(`[SCHEDULE] Sending to ${setGroups.length} groups with 2s delay...`);
               for (let i = 0; i < setGroups.length; i++) {
                 await resolveAndSend(setGroups[i], schedule.message);
                 if (i < setGroups.length - 1) {
-                  await delay(2000); // 2 second delay
+                  await delay(2000);
                 }
               }
             } else {
-              // Check if it's a contact
-              const contact = resolveContact(schedule.target);
-              const target = contact || schedule.target;
-              await resolveAndSend(target, schedule.message);
+              await resolveAndSend(schedule.target, schedule.message);
             }
-            
-            // Write notification to log file instead of sending via WhatsApp
+
+            sentScheduleIds.add(schedule.id);
             writeNotification(`✅ Sent: "${schedule.message}" → ${schedule.target}`);
           } catch (err) {
             console.error(`[SCHEDULE ERROR] ${err.message}`);

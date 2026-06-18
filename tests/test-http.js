@@ -2,16 +2,20 @@ const http = require('http');
 const { URL } = require('url');
 
 const BASE_URL = 'http://127.0.0.1:42620';
+const TEST_PASSWORD = process.env.SANDESHA_ADMIN_PASSWORD || process.env.TEST_AUTH_PASSWORD || '';
 
-function request(method, path, body = null) {
+function request(method, path, body = null, token = null) {
   return new Promise((resolve, reject) => {
     const urlObj = new URL(path, BASE_URL);
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers.Authorization = `Bearer ${token}`;
+
     const options = {
       hostname: urlObj.hostname,
       port: urlObj.port,
       path: urlObj.pathname + urlObj.search,
       method: method,
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       timeout: 10000
     };
 
@@ -83,44 +87,110 @@ async function runTests() {
     return res.status === 200 && res.data.status === 'ok';
   });
 
+  let authRequired = false;
+  let sharedToken = null;
+
+  async function getAuthToken() {
+    if (!authRequired) return null;
+    if (sharedToken) return sharedToken;
+    if (!TEST_PASSWORD) return null;
+    const login = await request('POST', '/auth/login', { password: TEST_PASSWORD });
+    sharedToken = login.data?.token || null;
+    return sharedToken;
+  }
+
+  await test('GET /health - Reports authRequired', async () => {
+    const res = await request('GET', '/health');
+    authRequired = res.data && res.data.authRequired === true;
+    return res.status === 200 && typeof res.data.authRequired === 'boolean';
+  });
+
+  if (authRequired) {
+    console.log('');
+    console.log('--- Test Suite: Auth (server has SANDESHA_ADMIN_PASSWORD set) ---');
+    console.log('');
+
+    await test('GET /groups - Returns 401 without token', async () => {
+      const res = await request('GET', '/groups');
+      return res.status === 401;
+    });
+
+    if (TEST_PASSWORD) {
+      let authToken = null;
+
+      await test('POST /auth/login - Returns token with valid password', async () => {
+        const res = await request('POST', '/auth/login', { password: TEST_PASSWORD });
+        if (res.status === 200 && res.data.token) {
+          authToken = res.data.token;
+          return true;
+        }
+        return false;
+      });
+
+      await test('GET /groups - Works with Bearer token', async () => {
+        if (!authToken) return false;
+        const res = await request('GET', '/groups', null, authToken);
+        return res.status === 200 && Array.isArray(res.data);
+      });
+    } else {
+      console.log('  (Skip login tests — set TEST_AUTH_PASSWORD or SANDESHA_ADMIN_PASSWORD env var)');
+    }
+  } else {
+    console.log('');
+    console.log('--- Auth disabled or no password — skipping 401/login tests ---');
+    console.log('');
+  }
+
   await test('GET /groups - Returns groups array', async () => {
-    const res = await request('GET', '/groups');
+    const token = await getAuthToken();
+    const res = await request('GET', '/groups', null, token);
+    if (authRequired && !token) return res.status === 401;
     return res.status === 200 && Array.isArray(res.data);
   });
 
   await test('GET /groups - Groups have required fields', async () => {
-    const res = await request('GET', '/groups');
-    if (res.data.length > 0) {
+    const token = await getAuthToken();
+    const res = await request('GET', '/groups', null, token);
+    if (authRequired && !token) return res.status === 401;
+    if (Array.isArray(res.data) && res.data.length > 0) {
       const g = res.data[0];
       return g.name && g.jid;
     }
-    return true;
+    return res.status === 200;
   });
 
   await test('GET /chats - Returns chats', async () => {
-    const res = await request('GET', '/chats');
+    const token = await getAuthToken();
+    const res = await request('GET', '/chats', null, token);
+    if (authRequired && !token) return res.status === 401;
     return res.status === 200;
   });
 
   await test('GET /chats - Supports limit parameter', async () => {
-    const res = await request('GET', '/chats?limit=5');
+    const token = await getAuthToken();
+    const res = await request('GET', '/chats?limit=5', null, token);
+    if (authRequired && !token) return res.status === 401;
     return res.status === 200 && res.data.chats.length <= 5;
   });
 
   await test('POST /send - Missing body returns 400', async () => {
-    const res = await request('POST', '/send', {});
+    const token = await getAuthToken();
+    const res = await request('POST', '/send', {}, token);
+    if (authRequired && !token) return res.status === 401;
     return res.status === 400;
   });
 
   await test('POST /send - Valid request structure', async () => {
-    const res = await request('POST', '/send', {
-      message: 'test'
-    });
+    const token = await getAuthToken();
+    const res = await request('POST', '/send', { message: 'test' }, token);
+    if (authRequired && !token) return res.status === 401;
     return res.status === 400 || res.status === 500;
   });
 
   await test('POST /send-media - Missing body returns 400', async () => {
-    const res = await request('POST', '/send-media', {});
+    const token = await getAuthToken();
+    const res = await request('POST', '/send-media', {}, token);
+    if (authRequired && !token) return res.status === 401;
     return res.status === 400;
   });
 
@@ -134,13 +204,17 @@ async function runTests() {
   console.log('');
 
   await test('Invalid JSON body handles gracefully', async () => {
-    return new Promise((resolve) => {
+    return new Promise(async (resolve) => {
+      const token = await getAuthToken();
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
       const options = {
         hostname: '127.0.0.1',
         port: 42620,
         path: '/send',
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers,
       };
 
       const req = http.request(options, (res) => {

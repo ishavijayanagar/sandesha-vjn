@@ -2,7 +2,10 @@ const http = require('http');
 const path = require('path');
 const fs = require('fs');
 
+require('./auth');
+
 const GROUPS_FILE = path.join(__dirname, 'groups.json');
+let apiToken = null;
 
 const args = process.argv.slice(2);
 const flags = { groups: [] };
@@ -48,15 +51,26 @@ function loadSets() {
   }
 }
 
-function request(method, path, body) {
+function rawRequest(method, reqPath, body, token) {
   return new Promise((resolve) => {
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers.Authorization = `Bearer ${token}`;
+
     const req = http.request({
-      hostname: '127.0.0.1', port: 42620, path, method,
-      headers: { 'Content-Type': 'application/json' }, timeout: 15000
+      hostname: '127.0.0.1', port: 42620, path: reqPath, method,
+      headers, timeout: 15000
     }, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
-      res.on('end', () => { try { resolve(JSON.parse(data)); } catch { resolve(data); } });
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (res.statusCode === 401) parsed.error = parsed.error || 'Unauthorized';
+          resolve(parsed);
+        } catch {
+          resolve(data);
+        }
+      });
     });
     req.on('error', (err) => {
       console.error('Error:', err.message, '\nIs listen.js running?');
@@ -66,6 +80,20 @@ function request(method, path, body) {
     if (body) req.write(JSON.stringify(body));
     req.end();
   });
+}
+
+async function ensureApiToken() {
+  if (apiToken) return apiToken;
+  const password = process.env.SANDESHA_ADMIN_PASSWORD;
+  if (!password) return null;
+  const result = await rawRequest('POST', '/auth/login', { password });
+  apiToken = result.token || null;
+  return apiToken;
+}
+
+async function request(method, reqPath, body) {
+  const token = await ensureApiToken();
+  return rawRequest(method, reqPath, body, token);
 }
 
 async function main() {

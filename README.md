@@ -33,15 +33,11 @@ npm install
 
 ### 1. Configure Groups
 
-Edit `groups.json`:
+**Web dashboard** (after `./start.sh`): open **http://127.0.0.1:42620/** — search groups, save sets.
 
-```json
-{
-  "family": ["Family Group JID", "Another Family Group"],
-  "work": ["Work Group JID"],
-  "all": ["Group1", "Group2", "Group3"]
-}
-```
+**WhatsApp:** send `!settings` in Me Commands — guided add/edit/delete.
+
+**Manual:** edit `groups.json` (see [SETUP_GUIDE.md](SETUP_GUIDE.md)).
 
 ### 2. Configure Contacts (Optional)
 
@@ -77,7 +73,20 @@ start-fresh.bat
 
 The bot listens to a specific group (default: "Me Commands"). Add the bot to that group and send commands there.
 
+## Web dashboard & GitHub Pages
+
+- **Local UI:** http://127.0.0.1:42620/ (while `listen.js` is running)
+- **GitHub Pages:** enable `docs/` folder in repo Settings → Pages ([details](docs/README.md))
+- **WhatsApp:** `!settings` in Me Commands for the same features in chat
+
 ## Commands
+
+### Settings & sets
+
+```
+!settings    # menu: add / edit / delete sets
+!sets        # list current sets
+```
 
 ### Help Command
 

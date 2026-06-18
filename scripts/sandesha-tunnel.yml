@@ -1,0 +1,3 @@
+# Use this config so Quick Tunnel does not pick up ~/.cloudflared/config.yml
+# Run: cloudflared tunnel --config /path/to/sandesha-tunnel.yml --url http://127.0.0.1:42620
+url: http://127.0.0.1:42620
