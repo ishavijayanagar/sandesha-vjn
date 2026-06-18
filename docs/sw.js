@@ -1,14 +1,11 @@
-const CACHE = 'sandesha-shell-v1';
+const CACHE = 'sandesha-shell-v2';
 const ASSETS = [
-  './',
   './index.html',
   './css/tokens.css',
   './css/layout.css',
   './css/components.css',
-  './js/app.js',
   './config.js',
   './manifest.webmanifest',
-  './icons/icon-192.png',
 ];
 
 self.addEventListener('install', (e) => {
@@ -32,6 +29,9 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (url.origin !== location.origin) return;
   e.respondWith(
-    caches.match(e.request).then((cached) => cached || fetch(e.request))
+    caches.match(e.request).then((cached) => {
+      if (cached && !e.request.url.includes('/js/')) return cached;
+      return fetch(e.request);
+    })
   );
 });

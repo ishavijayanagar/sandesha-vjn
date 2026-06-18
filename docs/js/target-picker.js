@@ -1,4 +1,4 @@
-import { escapeHtml, escapeAttr } from '../api.js';
+import { escapeHtml, escapeAttr } from './api.js';
 
 export function openTargetPicker(options, onSelect) {
   const overlay = document.createElement('div');
