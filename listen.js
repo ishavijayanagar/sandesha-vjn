@@ -1,5 +1,6 @@
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const auth = require('./auth');
+const { createApiHandlers } = require('./api-handlers');
 const { createSettingsWizard } = require('./settings');
 const { createBulkSendWizard } = require('./bulk-send');
 const { createBulkAddMembersWizard } = require('./bulk-add-members');
@@ -62,6 +63,7 @@ let recentReplies = new Set();
 let myNumber = null;
 let commandsGroupJid = null;
 let sendServer = null;
+let apiHandlers = null;
 
 const BOT_GREETING = '> Namaskaram 🙏,';
 
@@ -192,6 +194,28 @@ client.on('ready', async () => {
   
   log('Setting up commands group...');
   await setupCommandsGroup();
+  apiHandlers = createApiHandlers({
+    client,
+    loadSchedules,
+    saveSchedules,
+    loadContacts,
+    saveContacts,
+    loadSets,
+    parseScheduleTime,
+    validateScheduleTarget,
+    resolveAndSend,
+    formatTimeAgo,
+    getGroupParticipantCount,
+    isAnnouncementGroup,
+    getGroupTypeLabel,
+    normalizePhoneDigits,
+    delay,
+    forwardToZeroClaw,
+    MEDIA_DIR,
+    log,
+    resolveGroupByName,
+    resolveParticipantWids,
+  });
   log('Starting send server...');
   startSendServer();
   log('Starting message poller...');
@@ -1980,11 +2004,20 @@ const WEB_MIME = {
   '.json': 'application/json',
   '.png': 'image/png',
   '.ico': 'image/x-icon',
+  '.svg': 'image/svg+xml',
+  '.webmanifest': 'application/manifest+json',
 };
+
+function isStaticAsset(pathname) {
+  if (pathname === '/' || pathname.startsWith('/dashboard')) return true;
+  if (pathname.startsWith('/css/') || pathname.startsWith('/js/') || pathname.startsWith('/icons/')) return true;
+  if (pathname === '/sw.js' || pathname === '/manifest.webmanifest' || pathname === '/config.js') return true;
+  return /\.(css|js|png|svg|ico|webmanifest)$/i.test(pathname);
+}
 
 function setCorsHeaders(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 }
 
@@ -2041,7 +2074,7 @@ function startSendServer() {
       return;
     }
 
-    if (req.method === 'GET' && (parsed.pathname === '/' || parsed.pathname.startsWith('/dashboard') || parsed.pathname.endsWith('.css') || parsed.pathname.endsWith('.js'))) {
+    if (req.method === 'GET' && isStaticAsset(parsed.pathname)) {
       if (serveStaticFile(req, res, parsed)) return;
     }
 
@@ -2108,6 +2141,13 @@ function startSendServer() {
           const { recipient, message, jid } = JSON.parse(body);
           let target = jid || recipient;
           if (!target || !message) { res.writeHead(400); res.end('{}'); return; }
+          const sets = loadSets();
+          const setGroups = sets[target.toLowerCase()];
+          if (setGroups) {
+            for (const g of setGroups) { await resolveAndSend(g, message); }
+            res.writeHead(200); res.end(JSON.stringify({ ok: true, count: setGroups.length }));
+            return;
+          }
           await resolveAndSend(target, message);
           res.writeHead(200); res.end(JSON.stringify({ ok: true }));
         } catch (err) { res.writeHead(500); res.end(JSON.stringify({ error: err.message })); }
@@ -2142,16 +2182,12 @@ function startSendServer() {
     if (req.method === 'GET' && parsed.pathname === '/groups') {
       if (!requireAuth(req, res)) return;
       try {
-        const chats = await client.getChats();
-        const groups = chats.filter(c => c.isGroup).map(g => ({
-          name: g.name,
-          jid: g.id._serialized,
-          participants: getGroupParticipantCount(g),
-          announcement: isAnnouncementGroup(g),
-          type: getGroupTypeLabel(g),
-        }));
-        res.writeHead(200); res.end(JSON.stringify(groups));
-      } catch (err) { res.writeHead(500); res.end(JSON.stringify({ error: err.message })); }
+        const force = parsed.query.refresh === '1';
+        const groups = apiHandlers
+          ? await apiHandlers.getGroupsEnriched(force)
+          : [];
+        jsonResponse(res, 200, groups);
+      } catch (err) { jsonResponse(res, 500, { error: err.message }); }
       return;
     }
 
@@ -2183,6 +2219,11 @@ function startSendServer() {
         }));
       } catch (err) { res.writeHead(500); res.end(JSON.stringify({ error: err.message })); }
       return;
+    }
+
+    if (apiHandlers) {
+      const handled = await apiHandlers.handleRequest(req, res, parsed, requireAuth);
+      if (handled) return;
     }
 
     res.writeHead(404); res.end('Not found');

@@ -200,6 +200,72 @@ async function runTests() {
   });
 
   console.log('');
+  console.log('--- Test Suite: Extended API routes ---');
+  console.log('');
+
+  await test('GET /schedules - Returns schedules', async () => {
+    const token = await getAuthToken();
+    const res = await request('GET', '/schedules', null, token);
+    if (authRequired && !token) return res.status === 401;
+    return res.status === 200 && Array.isArray(res.data.schedules);
+  });
+
+  await test('GET /contacts - Returns contacts object', async () => {
+    const token = await getAuthToken();
+    const res = await request('GET', '/contacts', null, token);
+    if (authRequired && !token) return res.status === 401;
+    return res.status === 200;
+  });
+
+  await test('GET /ai/status - Returns availability', async () => {
+    const token = await getAuthToken();
+    const res = await request('GET', '/ai/status', null, token);
+    if (authRequired && !token) return res.status === 401;
+    return res.status === 200 && typeof res.data.available === 'boolean';
+  });
+
+  await test('POST /send/bulk - Missing message returns 400', async () => {
+    const token = await getAuthToken();
+    const res = await request('POST', '/send/bulk', { numbers: ['123'] }, token);
+    if (authRequired && !token) return res.status === 401;
+    return res.status === 400;
+  });
+
+  await test('GET /groups/inactive - Returns array', async () => {
+    const token = await getAuthToken();
+    const res = await request('GET', '/groups/inactive?days=30', null, token);
+    if (authRequired && !token) return res.status === 401;
+    return res.status === 200 && Array.isArray(res.data);
+  });
+
+  await test('POST /upload - Missing body returns 400', async () => {
+    const token = await getAuthToken();
+    return new Promise(async (resolve) => {
+      const headers = { 'Content-Type': 'multipart/form-data; boundary=----test' };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      const options = {
+        hostname: '127.0.0.1',
+        port: 42620,
+        path: '/upload',
+        method: 'POST',
+        headers,
+      };
+
+      const req = http.request(options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          if (authRequired && !token) resolve(res.statusCode === 401);
+          else resolve(res.statusCode === 400);
+        });
+      });
+      req.on('error', () => resolve(false));
+      req.end('------test--\r\n\r\n');
+    });
+  });
+
+  console.log('');
   console.log('--- Test Suite: Error Handling ---');
   console.log('');
 

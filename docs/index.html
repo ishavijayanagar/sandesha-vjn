@@ -2,99 +2,82 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#128c7e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Sandesha</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/tokens.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/components.css">
 </head>
 <body>
-  <header>
-    <h1>Sandesha</h1>
-    <p class="subtitle">WhatsApp group messaging — web dashboard</p>
-  </header>
-
-  <section id="login-section" class="card hidden">
-    <h2>Login</h2>
-    <p class="hint">Enter the admin password configured on your Sandesha server.</p>
-    <div class="row">
-      <input type="password" id="login-password" placeholder="Admin password" autocomplete="current-password">
-      <button id="btn-login">Login</button>
+  <div id="login-view">
+    <div class="card login-card">
+      <h1>Sandesha</h1>
+      <p class="subtitle">WhatsApp group messaging</p>
+      <div class="field">
+        <label for="login-password">Admin password</label>
+        <div class="pw-row">
+          <input type="password" id="login-password" placeholder="Password" autocomplete="current-password">
+          <button type="button" class="toggle-pw" id="toggle-pw">Show</button>
+        </div>
+      </div>
+      <button type="button" class="btn" id="btn-login">Login</button>
+      <p id="login-status" class="hint" style="margin-top:12px"></p>
     </div>
-    <div id="login-status" class="status info"></div>
-  </section>
-
-  <div id="app-section" class="hidden">
-    <nav class="tabs" id="tabs">
-      <button type="button" class="tab active" data-tab="status">Status</button>
-      <button type="button" class="tab" data-tab="groups">Groups</button>
-      <button type="button" class="tab" data-tab="sets">Sets</button>
-      <button type="button" class="tab" data-tab="send">Send</button>
-      <button type="button" class="tab tab-logout" id="btn-logout">Logout</button>
-    </nav>
-
-    <div id="status-bar" class="status info">Connecting…</div>
-
-    <section id="panel-status" class="card tab-panel">
-      <h2>Bot status</h2>
-      <div id="status-details" class="status-grid"><p class="empty">Loading…</p></div>
-    </section>
-
-    <section id="panel-groups" class="card tab-panel hidden">
-      <h2>WhatsApp groups</h2>
-      <div class="row">
-        <input type="search" id="groups-search" placeholder="Search groups…">
-      </div>
-      <div id="groups-list" class="group-list"><p class="empty">Loading…</p></div>
-    </section>
-
-    <section id="panel-sets" class="card tab-panel hidden">
-      <h2>Your sets</h2>
-      <div id="sets-list"><p class="empty">Loading…</p></div>
-      <h2 style="margin-top:16px">Add or update a set</h2>
-      <div class="row">
-        <input type="text" id="set-name" placeholder="Set name (e.g. family)">
-      </div>
-      <div class="row">
-        <input type="search" id="group-search" placeholder="Search groups…">
-        <button type="button" class="secondary" id="btn-select-all">Select all shown</button>
-        <button type="button" class="secondary" id="btn-clear-sel">Clear</button>
-      </div>
-      <div id="group-list" class="group-list"><p class="empty">Loading…</p></div>
-      <div class="row" style="margin-top:12px">
-        <button id="btn-save-set" disabled>Save set</button>
-      </div>
-      <p class="hint">Saving merges selected groups into the set. Delete a set from the list above.</p>
-    </section>
-
-    <section id="panel-send" class="card tab-panel hidden">
-      <h2>Send message</h2>
-      <div class="row">
-        <input type="text" id="send-target" placeholder="Target: set name, group name, or JID">
-      </div>
-      <div class="row">
-        <textarea id="send-message" rows="4" placeholder="Message text"></textarea>
-      </div>
-      <div class="row">
-        <button id="btn-send">Send</button>
-      </div>
-      <p class="hint">Examples: <code>family</code> (set), <code>My Group</code> (exact group name), or a JID ending in <code>@g.us</code></p>
-      <div id="send-status" class="status info hidden"></div>
-    </section>
   </div>
 
-  <details class="card advanced">
-    <summary>Advanced — API URL override</summary>
-    <div class="row" style="margin-top:10px">
-      <input type="text" id="api-url" placeholder="http://127.0.0.1:42620">
-      <button type="button" class="secondary" id="btn-save-api">Save URL</button>
-    </div>
-    <p class="hint">For GitHub Pages, set <code>docs/config.js</code> from <code>config.example.js</code>. Override here for local testing.</p>
-  </details>
+  <div id="app-view" class="hidden app-shell">
+    <div id="offline-banner" class="hidden">Cannot reach server — check tunnel and API URL in Settings</div>
 
-  <footer>
-    Sandesha · Also use <code>!settings</code> in Me Commands on WhatsApp
-  </footer>
+    <header class="app-header" id="app-header">
+      <button type="button" class="back-btn hidden" id="header-back" aria-label="Back">‹</button>
+      <h1 id="header-title">Sandesha</h1>
+    </header>
+
+    <main class="app-main" id="app-main">
+      <div class="page-panel active" data-tab="home" id="page-home"></div>
+      <div class="page-panel" data-tab="send" id="page-send"></div>
+      <div class="page-panel" data-tab="schedule" id="page-schedule"></div>
+      <div class="page-panel" data-tab="groups" id="page-groups"></div>
+      <div class="page-panel" data-tab="more" id="page-more"></div>
+
+      <div class="sub-page" data-sub="group-detail" id="sub-group-detail"></div>
+      <div class="sub-page" data-sub="sets" id="sub-sets"></div>
+      <div class="sub-page" data-sub="contacts" id="sub-contacts"></div>
+      <div class="sub-page" data-sub="bulk" id="sub-bulk"></div>
+      <div class="sub-page" data-sub="add-members" id="sub-add-members"></div>
+      <div class="sub-page" data-sub="ai" id="sub-ai"></div>
+      <div class="sub-page" data-sub="settings" id="sub-settings"></div>
+      <div class="sub-page" data-sub="help" id="sub-help"></div>
+    </main>
+
+    <nav class="bottom-nav" id="bottom-nav" aria-label="Main">
+      <button type="button" data-tab="home" class="active">
+        <span class="nav-icon">🏠</span><span>Home</span>
+      </button>
+      <button type="button" data-tab="send">
+        <span class="nav-icon">📤</span><span>Send</span>
+      </button>
+      <button type="button" data-tab="schedule">
+        <span class="nav-icon">⏰</span><span>Schedule</span>
+      </button>
+      <button type="button" data-tab="groups">
+        <span class="nav-icon">👥</span><span>Groups</span>
+      </button>
+      <button type="button" data-tab="more">
+        <span class="nav-icon">☰</span><span>More</span>
+      </button>
+    </nav>
+  </div>
+
+  <div id="toast-container"></div>
 
   <script src="config.js"></script>
-  <script src="app.js"></script>
+  <script type="module" src="js/app.js"></script>
 </body>
 </html>

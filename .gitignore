@@ -52,8 +52,8 @@ qr-code.png
 MyGroups.txt
 output.txt
 
-# Dashboard API URL (copy from config.example.js)
-docs/config.js
+# Dashboard API URL — commit docs/config.js for GitHub Pages (URL is not secret)
+# docs/config.js
 
 # Test files
 test_*.js

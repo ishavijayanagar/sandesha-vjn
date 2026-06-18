@@ -10,6 +10,7 @@
     "test": "node tests/comprehensive.test.js && node tests/mock-integration.test.js",
     "test:unit": "node tests/comprehensive.test.js",
     "test:auth": "node tests/auth.test.js",
+    "test:api-handlers": "node tests/api-handlers.test.js",
     "test:mock": "node tests/mock-integration.test.js",
     "test:http": "node tests/test-http.js"
   },
